@@ -2,7 +2,7 @@ import torch.nn as nn
 
 from .bbox_head import BBoxHead
 from ..utils import ConvModule
-
+# from nn.functional import normalize
 
 class ConvFCBBoxHead(BBoxHead):
     """More general bbox head, with shared conv and fc layers and two optional
@@ -160,7 +160,16 @@ class ConvFCBBoxHead(BBoxHead):
         for fc in self.reg_fcs:
             x_reg = self.relu(fc(x_reg))
 
-        cls_score = self.fc_cls(x_cls) if self.with_cls else None
+        # get the weight of fc_cls, which is [C, D]
+        # weight of the feat, [N, D]
+        fc_cls_weight_norm = nn.functional.normalize(self.fc_cls.weight, p=2, dim=1)
+        x_cls_norm = nn.functional.normalize(x_cls, p=2, dim=1)
+
+        #alpha set as constant for expriment, alpha=1-margin
+        # [N, D] x [C, D]^t -> [N, C]s
+        normed_cls_score = x_cls.matmul(fc_cls_weight_norm.t())
+
+        cls_score = normed_cls_score   if self.with_cls else None
         bbox_pred = self.fc_reg(x_reg) if self.with_reg else None
         return cls_score, bbox_pred
 
