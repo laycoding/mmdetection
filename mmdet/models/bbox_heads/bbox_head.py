@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from mmdet.core import (delta2bbox, multiclass_nms, bbox_target,
-                        weighted_cross_entropy, weighted_smoothl1, accuracy)
+                        weighted_cross_entropy, weighted_smoothl1, accuracy, weighted_cosine_loss)
 
 
 class BBoxHead(nn.Module):

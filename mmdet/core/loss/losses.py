@@ -21,13 +21,13 @@ def weighted_cross_entropy(pred, label, weight, avg_factor=None,
         return raw * weight / avg_factor
 
 def weighted_cosine_loss(normed_pred, label, weight, num_classes, avg_factor=None,
-                           reduce=True, alpha=0.5, enlarge_scale=64):
-    # alpha = 1 - margin
-    margin_cls_score = normed_pred - alpha
+                           reduce=True, alpha=0.1, enlarge_scale=64):
+    # alpha = margin
+    margin_normed_cls_score = normed_pred - alpha
     one_hot_label = one_hot_(label, num_classes)
     # use margined value except bg class
     one_hot_label[:,0] = 0
-    mixed_cls_score = enlarge_scale * torch.where(one_hot_label>0, margin_normed_cls_score, normed_cls_score)
+    mixed_cls_score = enlarge_scale * torch.where(one_hot_label>0, margin_normed_cls_score, normed_pred)
 
     if avg_factor is None:
         avg_factor = max(torch.sum(weight > 0).float().item(), 1.)
@@ -40,8 +40,8 @@ def weighted_cosine_loss(normed_pred, label, weight, num_classes, avg_factor=Non
 
 def one_hot_(labels, num_classes):
     # torch vision 1.0 stable
-    ones = torch.eye(num_class).cuda()
-    return ones.index_select(0,label)
+    ones = torch.eye(num_classes).cuda()
+    return ones.index_select(0, labels)
 
 def weighted_binary_cross_entropy(pred, label, weight, avg_factor=None):
     if avg_factor is None:
