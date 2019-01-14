@@ -8,7 +8,7 @@ from mmdet.core import (delta2bbox, multiclass_nms, bbox_target,
 
 class BBoxHead(nn.Module):
     """Simplest RoI head, with only two fc layers for classification and
-    regression respectively"""
+    regression respectiely"""
 
     def __init__(self,
                  with_avg_pool=False,

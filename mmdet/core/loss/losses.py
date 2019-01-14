@@ -25,9 +25,12 @@ def weighted_cosine_loss(normed_pred, label, weight, num_classes, avg_factor=Non
     # alpha = margin
     margin_normed_cls_score = normed_pred - alpha
     one_hot_label = one_hot_(label, num_classes)
-    # use margined value except bg class
-    one_hot_label[:,0] = 0
-    mixed_cls_score = enlarge_scale * torch.where(one_hot_label>0, margin_normed_cls_score, normed_pred)
+    if 1:
+        # use margined value except bg class
+        one_hot_label[:,0] = 0
+        mixed_cls_score = enlarge_scale * torch.where(one_hot_label>0, margin_normed_cls_score, normed_pred)
+    else:
+        mixed_cls_score = margin_normed_cls_score
 
     if avg_factor is None:
         avg_factor = max(torch.sum(weight > 0).float().item(), 1.)
