@@ -165,7 +165,7 @@ class ConvFCBBoxHead(BBoxHead):
         fc_cls_weight_norm = nn.functional.normalize(self.fc_cls.weight, p=2, dim=1)
         x_cls_norm = nn.functional.normalize(x_cls, p=2, dim=1)
 
-        #alpha set as constant for expriment, alpha=1-margin
+        #alpha set as constant for expriment, alpha=margin
         # [N, D] x [C, D]^t -> [N, C]s
         normed_cls_score = x_cls.matmul(fc_cls_weight_norm.t())
 
