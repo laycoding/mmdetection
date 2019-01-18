@@ -82,7 +82,8 @@ class TwoStageDetector(BaseDetector, RPNTestMixin, BBoxTestMixin,
                       gt_bboxes_ignore,
                       gt_labels,
                       gt_masks=None,
-                      proposals=None):
+                      proposals=None,
+                      extra_neg_class=True):
         x = self.extract_feat(img)
 
         losses = dict()
