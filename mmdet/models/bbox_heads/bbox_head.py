@@ -21,7 +21,8 @@ class BBoxHead(nn.Module):
                  num_classes=81,
                  target_means=[0., 0., 0., 0.],
                  target_stds=[0.1, 0.1, 0.2, 0.2],
-                 reg_class_agnostic=False):
+                 reg_class_agnostic=False,
+                 with_extra_class=False):
         super(BBoxHead, self).__init__()
         assert with_cls or with_reg
         self.with_avg_pool = with_avg_pool
@@ -29,7 +30,10 @@ class BBoxHead(nn.Module):
         self.with_reg = with_reg
         self.roi_feat_size = roi_feat_size
         self.in_channels = in_channels
-        self.num_classes = num_classes
+        if with_extra_class:
+            self.num_classes = num_classes * 2 - 1
+        else:
+            self.num_classes = num_classes           
         self.target_means = target_means
         self.target_stds = target_stds
         self.reg_class_agnostic = reg_class_agnostic
@@ -40,9 +44,9 @@ class BBoxHead(nn.Module):
         else:
             in_channels *= (self.roi_feat_size * self.roi_feat_size)
         if self.with_cls:
-            self.fc_cls = nn.Linear(in_channels, num_classes)
+            self.fc_cls = nn.Linear(in_channels, self.num_classes)
         if self.with_reg:
-            out_dim_reg = 4 if reg_class_agnostic else 4 * num_classes
+            out_dim_reg = 4 if reg_class_agnostic else 4 * self.num_classes
             self.fc_reg = nn.Linear(in_channels, out_dim_reg)
         self.debug_imgs = None
 
