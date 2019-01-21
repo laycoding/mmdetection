@@ -38,7 +38,8 @@ model = dict(
         num_classes=21,
         target_means=[0., 0., 0., 0.],
         target_stds=[0.1, 0.1, 0.2, 0.2],
-        reg_class_agnostic=False))
+        reg_class_agnostic=False),
+        with_extra_class=True)
 # model training and testing settings
 train_cfg = dict(
     rpn=dict(
