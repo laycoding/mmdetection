@@ -21,7 +21,7 @@ def weighted_cross_entropy(pred, label, weight, avg_factor=None,
         return raw * weight / avg_factor
 
 def weighted_cosine_loss(normed_pred, label, weight, num_classes, avg_factor=None,
-                           reduce=True, alpha=0.1, enlarge_scale=64):
+                           reduce=True, alpha=0.1, enlarge_scale=4):
     # alpha = margin
     margin_normed_cls_score = normed_pred - alpha
     one_hot_label = one_hot_(label, num_classes)

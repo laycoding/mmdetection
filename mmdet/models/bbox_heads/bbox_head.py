@@ -33,6 +33,8 @@ class BBoxHead(nn.Module):
         self.reg_class_agnostic = reg_class_agnostic
 
         in_channels = self.in_channels
+        if self.with_extra_class:
+            self.num_classes = self.num_classes * 2 - 1
         if self.with_avg_pool:
             self.avg_pool = nn.AvgPool2d(roi_feat_size)
         else:

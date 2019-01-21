@@ -11,7 +11,6 @@ class MaxIoUWithExtraClassAssigner(BaseAssigner):
     Each proposals will be assigned with `-2`, `-1`, `0`, or a positive integer
     indicating the ground truth index.
 
-    - -2: samples not that negative
     - -1: don't care
     - 0: negative sample, no assigned gt
     - positive integer: positive sample, index (1-based) of assigned gt
@@ -47,14 +46,13 @@ class MaxIoUWithExtraClassAssigner(BaseAssigner):
         """Assign gt to bboxes.
 
         This method assign a gt bbox to every bbox (proposal/anchor), each bbox
-        will be assigned with -2, -1, 0, or a positive number. -2 means not exact
-        negative sample, -1 means don't care, 0 means exact negative sample, 
-        positive number is the index (1-based) of assigned gt.
+        will be assigned with -1, 0, or a positive number. -1 means don't care, 
+        0 means exact negative sample, a positive number is the (index of assigned gt).
         The assignment is done in following steps, the order matters.
 
         1. assign every bbox to -1,
         2. assign proposals whose iou with all gts < exact_neg_thr to 0,
-        3. for each bbox, if the iou with its nearest gt >= pos_iou_thr,
+        3. for each bbox, if the iou with its nearest gt >= exact_neg_thr,
            assign it to that bbox, 
         4. for each gt bbox, assign its nearest proposals (may be more than
            one) to itself
@@ -126,8 +124,10 @@ class MaxIoUWithExtraClassAssigner(BaseAssigner):
 
         # 3. assign positive: above positive IoU threshold
         pos_inds = max_overlaps >= self.pos_iou_thr
+        neg_inds = (max_overlaps >= self.exact_neg_thr) * \
+                   (max_overlaps <= self.neg_iou_thr)
         assigned_gt_inds[pos_inds] = argmax_overlaps[pos_inds] + 1
-
+        assigned_gt_inds[neg_inds] = argmax_overlaps[neg_inds] + 1
         # 4. assign fg: for each gt, proposals with highest IoU
         for i in range(num_gts):
             if gt_max_overlaps[i] >= self.min_pos_iou:
@@ -140,9 +140,13 @@ class MaxIoUWithExtraClassAssigner(BaseAssigner):
         if gt_labels is not None:
             assigned_labels = assigned_gt_inds.new_zeros((num_bboxes, ))
             pos_inds = torch.nonzero(assigned_gt_inds > 0).squeeze()
+            neg_inds = torch.nonzero(assigned_gt_inds > 0).squeeze()
             if pos_inds.numel() > 0:
                 assigned_labels[pos_inds] = gt_labels[
-                    assigned_gt_inds[pos_inds] - 1]
+                    assigned_gt_inds[pos_inds] - 1] * 2
+            if neg_inds.numel() > 0:
+                assigned_labels[neg_inds] = gt_labels[
+                    assigned_gt_inds[neg_inds] - 1] * 2 + 1
         else:
             assigned_labels = None
 
