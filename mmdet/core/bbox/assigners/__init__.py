@@ -1,5 +1,6 @@
 from .base_assigner import BaseAssigner
-from .max_iou_assigner import MaxIoUAssigner, MaxIoUWithExtraClassAssigner
+from .max_iou_assigner import MaxIoUAssigner
+from .max_iou_assigner_with_extra_label import MaxIoUWithExtraClassAssigner
 from .assign_result import AssignResult
 
 __all__ = ['BaseAssigner', 'MaxIoUAssigner', 'AssignResult', 'MaxIoUWithExtraClassAssigner']
