@@ -104,6 +104,8 @@ class MaxIoUWithExtraClassAssigner(BaseAssigner):
         # 1. assign -1 by default
         assigned_gt_inds = overlaps.new_full(
             (num_bboxes, ), -1, dtype=torch.long)
+        neg_assigned_gt_inds = overlaps.new_full(
+            (num_bboxes, ), -1, dtype=torch.long)
 
         assert overlaps.size() == (num_bboxes, num_gts)
         # for each anchor, which gt best overlaps with it
@@ -124,10 +126,11 @@ class MaxIoUWithExtraClassAssigner(BaseAssigner):
 
         # 3. assign positive: above positive IoU threshold
         pos_inds = max_overlaps >= self.pos_iou_thr
-        neg_inds = (max_overlaps >= self.exact_neg_thr) * \
+        neg_inds = (max_overlaps >= self.exact_neg_thr) & \
                    (max_overlaps <= self.neg_iou_thr)
         assigned_gt_inds[pos_inds] = argmax_overlaps[pos_inds] + 1
         assigned_gt_inds[neg_inds] = argmax_overlaps[neg_inds] + 1
+        neg_assigned_gt_inds[neg_inds] = argmax_overlaps[neg_inds] + 1
         # 4. assign fg: for each gt, proposals with highest IoU
         for i in range(num_gts):
             if gt_max_overlaps[i] >= self.min_pos_iou:
@@ -140,7 +143,7 @@ class MaxIoUWithExtraClassAssigner(BaseAssigner):
         if gt_labels is not None:
             assigned_labels = assigned_gt_inds.new_zeros((num_bboxes, ))
             pos_inds = torch.nonzero(assigned_gt_inds > 0).squeeze()
-            neg_inds = torch.nonzero(assigned_gt_inds > 0).squeeze()
+            neg_inds = torch.nonzero(neg_assigned_gt_inds > 0).squeeze()
             if pos_inds.numel() > 0:
                 assigned_labels[pos_inds] = gt_labels[
                     assigned_gt_inds[pos_inds] - 1] * 2

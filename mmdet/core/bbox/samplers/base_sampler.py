@@ -12,6 +12,7 @@ class BaseSampler(metaclass=ABCMeta):
                  pos_fraction,
                  neg_pos_ub=-1,
                  add_gt_as_proposals=True,
+                 with_extra_class=False,
                  **kwargs):
         self.num = num
         self.pos_fraction = pos_fraction
@@ -19,6 +20,7 @@ class BaseSampler(metaclass=ABCMeta):
         self.add_gt_as_proposals = add_gt_as_proposals
         self.pos_sampler = self
         self.neg_sampler = self
+        self.with_extra_class = with_extra_class
 
     @abstractmethod
     def _sample_pos(self, assign_result, num_expected, **kwargs):
@@ -53,7 +55,10 @@ class BaseSampler(metaclass=ABCMeta):
         gt_flags = bboxes.new_zeros((bboxes.shape[0], ), dtype=torch.uint8)
         if self.add_gt_as_proposals:
             bboxes = torch.cat([gt_bboxes, bboxes], dim=0)
-            assign_result.add_gt_(gt_labels)
+            if self.with_extra_class:
+                assign_result.add_gt_(gt_labels * 2)
+            else:
+                assign_result.add_gt_(gt_labels)
             gt_ones = bboxes.new_ones(gt_bboxes.shape[0], dtype=torch.uint8)
             gt_flags = torch.cat([gt_ones, gt_flags])
 
