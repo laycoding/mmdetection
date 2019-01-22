@@ -6,9 +6,10 @@ from .iou_balanced_neg_sampler import IoUBalancedNegSampler
 from .combined_sampler import CombinedSampler
 from .ohem_sampler import OHEMSampler
 from .sampling_result import SamplingResult
+from .extra_class_random_sampler import ExtraClassRandomSampler
 
 __all__ = [
     'BaseSampler', 'PseudoSampler', 'RandomSampler',
     'InstanceBalancedPosSampler', 'IoUBalancedNegSampler', 'CombinedSampler',
-    'OHEMSampler', 'SamplingResult'
+    'OHEMSampler', 'SamplingResult', 'ExtraClassRandomSampler'
 ]

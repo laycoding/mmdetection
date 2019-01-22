@@ -55,6 +55,8 @@ def bbox_target_single(pos_bboxes,
                                       target_stds)
         bbox_targets[:num_pos, :] = pos_bbox_targets
         bbox_weights[:num_pos, :] = 1
+        if cfg.assigner.type == "MaxIoUWithExtraClassAssigner":
+            bbox_weights[:num_pos][pos_gt_labels%2==1] = 0
     if num_neg > 0:
         label_weights[-num_neg:] = 1.0
     if reg_classes > 1:
