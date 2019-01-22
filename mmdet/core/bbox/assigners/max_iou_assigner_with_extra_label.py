@@ -146,7 +146,7 @@ class MaxIoUWithExtraClassAssigner(BaseAssigner):
                     assigned_gt_inds[pos_inds] - 1] * 2
             if neg_inds.numel() > 0:
                 assigned_labels[neg_inds] = gt_labels[
-                    assigned_gt_inds[neg_inds] - 1] * 2 + 1
+                    assigned_gt_inds[neg_inds] - 1] * 2 - 1
         else:
             assigned_labels = None
 
