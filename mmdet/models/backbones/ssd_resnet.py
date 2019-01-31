@@ -2,14 +2,17 @@
 # adjust by @laycoding
 import logging
 
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.checkpoint as cp
-from mmcv.cnn import constant_init, kaiming_init
+from mmcv.cnn import constant_init, kaiming_init, xavier_init
 from mmcv.runner import load_checkpoint
 
 from mmdet.ops import DeformConv, ModulatedDeformConv
 from ..registry import BACKBONES
 from ..utils import build_norm_layer
+from .resnet import ResNet, Bottleneck, BasicBlock
 
 @BACKBONES.register_module
 class SSDResNet(ResNet):
@@ -36,27 +39,24 @@ class SSDResNet(ResNet):
         zero_init_residual (bool): whether to use zero init for last norm layer
             in resblocks to let them behave as identity.
         l2_norm_scale (float): Used to norm the feats from different level
+
     """
-    arch_settings = {
+    # Arch_setting with extra residual conv layers
+    Arch_settings = {
         18: (BasicBlock, (2, 2, 2, 2)),
         34: (BasicBlock, (3, 4, 6, 3)),
         50: (Bottleneck, (3, 4, 6, 3)),
         101: (Bottleneck, (3, 4, 23, 3)),
         152: (Bottleneck, (3, 8, 36, 3))
     }
-    # extra conv layers setting
-    extra_setting = {
-        300: (256, 'S', 512, 128, 'S', 256, 128, 256, 128, 256),
-        512: (256, 'S', 512, 128, 'S', 256, 128, 'S', 256, 128, 'S', 256, 128),
-    }
     def __init__(self, input_size, l2_norm_scale=20., **kwargs):
         super(SSDResNet, self).__init__(**kwargs)
         assert input_size in (300, 512)
         self.input_size = input_size
         self.extra = self._make_extra_layers(self.extra_setting[input_size])
-        #NB: just norm fist out stage as the paper did
+        #NB: just norm fist out stage as the paper did(todo:use getattr())
         for name, module in self.named_children():
-            if name.endswith("layer"+str(out_indices[0]+1)):
+            if name.endswith("layer"+str(self.out_indices[0]+1)):
                 norm_channel_dim = module[-1].conv3.out_channels
         self.l2_norm = L2Norm(norm_channel_dim, l2_norm_scale)
 
@@ -86,10 +86,6 @@ class SSDResNet(ResNet):
         else:
             raise TypeError('pretrained must be a str or None')
 
-        for m in self.extra.modules():
-            if isinstance(m, nn.Conv2d):
-                xavier_init(m, distribution='uniform')
-
         constant_init(self.l2_norm, self.l2_norm.scale)
 
     def forward(self, x):
@@ -103,42 +99,14 @@ class SSDResNet(ResNet):
             x = res_layer(x)
             if i in self.out_indices:
                 outs.append(x)
-        for i, layer in enumerate(self.extra):
-            x = F.relu(layer(x), inplace=True)
-            if i % 2 == 1:
-                outs.append(x)
         #norm the first stage
-        outs[0] = self.l2_norm(outs[0])
+        if self.l2_norm_scale is not None:
+            outs[0] = self.l2_norm(outs[0])
         if len(outs) == 1:
             return outs[0]
         else:
             return tuple(outs)
 
-    def _make_extra_layers(self, outplanes):
-        layers = []
-        kernel_sizes = (1, 3)
-        num_layers = 0
-        outplane = None
-        for i in range(len(outplanes)):
-            if self.inplanes == 'S':
-                self.inplanes = outplane
-                continue
-            k = kernel_sizes[num_layers % 2]
-            if outplanes[i] == 'S':
-                outplane = outplanes[i + 1]
-                conv = nn.Conv2d(
-                    self.inplanes, outplane, k, stride=2, padding=1)
-            else:
-                outplane = outplanes[i]
-                conv = nn.Conv2d(
-                    self.inplanes, outplane, k, stride=1, padding=0)
-            layers.append(conv)
-            self.inplanes = outplanes[i]
-            num_layers += 1
-        if self.input_size == 512:
-            layers.append(nn.Conv2d(self.inplanes, 256, 4, padding=1))
-
-        return nn.Sequential(*layers)
 
 class L2Norm(nn.Module):
 
