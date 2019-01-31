@@ -5,36 +5,37 @@ from mmcv.cnn import xavier_init
 from ..utils import ConvModule
 from ..registry import NECKS
 from ..backbones import BasicBlock
+from .fpn import FPN
 
 
 @NECKS.register_module
-class TCB(nn.Module):
+class TCB(FPN):
 
     def __init__(self,
                  in_channels,
                  out_channels,
                  start_level=0,
                  end_level=-1,
-                 num_outs=4):
-        super(TCB, self).__init__()
+                 num_outs=4,
+                 **kwargs):
+        super(TCB, self).__init__(in_channels, out_channels, num_outs, **kwargs)
         assert isinstance(in_channels, list)
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.num_ins = len(in_channels)
         self.num_outs = num_outs
-        self.activation = activation
-        self.with_bias = normalize is None
+        # self.activation = activation
+        # self.with_bias = normalize is None
 
         if end_level == -1:
-            self.end_level = self.num_ins
+            self.end_level = self.num_ins + 1
             assert num_outs >= self.num_ins - start_level
         else:
             # if end_level < inputs, no extra level is allowed
             self.end_level = end_level
             assert end_level <= len(in_channels)
-            assert num_outs == end_level - start_level
+            assert num_outs == end_level - start_level + 1
         self.start_level = start_level
-        self.end_level = end_level
 
         self.lateral_convs = nn.ModuleList()
         self.fpn_convs = nn.ModuleList()
@@ -49,7 +50,7 @@ class TCB(nn.Module):
                 out_channels,
                 3,
                 padding=1,
-                normalize=normalize,
+                normalize=self.normalize,
                 bias=self.with_bias,
                 activation=self.activation,
                 inplace=False)

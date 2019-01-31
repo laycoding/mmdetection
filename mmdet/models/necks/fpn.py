@@ -25,6 +25,7 @@ class FPN(nn.Module):
         self.num_ins = len(in_channels)
         self.num_outs = num_outs
         self.activation = activation
+        self.normalize = normalize
         self.with_bias = normalize is None
 
         if end_level == -1:

@@ -328,7 +328,8 @@ class ResNet(nn.Module):
             raise KeyError('invalid depth {} for resnet'.format(depth))
         self.depth = depth
         self.num_stages = num_stages
-        assert num_stages >= 1 and num_stages <= 4
+        # assert num_stages >= 1 and num_stages <= 4
+        assert num_stages >= 1 and num_stages <= 5
         self.strides = strides
         self.dilations = dilations
         assert len(strides) == len(dilations) == len(
