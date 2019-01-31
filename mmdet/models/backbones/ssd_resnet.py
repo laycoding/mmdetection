@@ -53,12 +53,14 @@ class SSDResNet(ResNet):
         super(SSDResNet, self).__init__(**kwargs)
         assert input_size in (300, 512)
         self.input_size = input_size
-        self.extra = self._make_extra_layers(self.extra_setting[input_size])
         #NB: just norm fist out stage as the paper did(todo:use getattr())
         for name, module in self.named_children():
             if name.endswith("layer"+str(self.out_indices[0]+1)):
                 norm_channel_dim = module[-1].conv3.out_channels
-        self.l2_norm = L2Norm(norm_channel_dim, l2_norm_scale)
+        if l2_norm_scale is None:
+            self.l2_norm_scale = None
+        else:
+            self.l2_norm = L2Norm(norm_channel_dim, l2_norm_scale)
 
     def init_weights(self, pretrained=None):
         if isinstance(pretrained, str):
@@ -85,8 +87,8 @@ class SSDResNet(ResNet):
                         constant_init(m.norm2, 0)
         else:
             raise TypeError('pretrained must be a str or None')
-
-        constant_init(self.l2_norm, self.l2_norm.scale)
+        if self.l2_norm_scale is not None:
+            constant_init(self.l2_norm, self.l2_norm.scale)
 
     def forward(self, x):
         x = self.conv1(x)
