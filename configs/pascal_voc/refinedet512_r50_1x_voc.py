@@ -1,19 +1,19 @@
 # model settings
 input_size = 512
 model = dict(
-    type='RefindDet',
+    type='RefineDet',
     pretrained='modelzoo://resnet50',
     backbone=dict(
         type='SSDResNet',
         input_size=input_size,
         depth=50,
-        num_stages=4,
-        out_indices=(0, 1, 2, 3),
+        num_stages=5,#nb: special extra res6 for refinedet
+        out_indices=(1, 2, 3, 4),
         frozen_stages=1,
         style='pytorch',
         l2_norm_scale=None),
     neck=dict(
-        type='FPN',
+        type='TCB',
         in_channels=[256, 512, 1024, 2048],
         out_channels=256,
         start_level=1,

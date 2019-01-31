@@ -1,7 +1,7 @@
 # # -*- coding: utf-8 -*-
 # Atlab@laycoding
 import numpy as np
-import torchs
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.cnn import xavier_init
@@ -24,7 +24,7 @@ class RefineDetHead(AnchorHead):
                  anchor_ratios=([2], [2], [2], [2]),
                  target_means=(.0, .0, .0, .0),
                  target_stds=(1.0, 1.0, 1.0, 1.0)):
-        super(RefineDetHead, self).__init__()
+        super(AnchorHead, self).__init__()
         self.input_size = input_size
         self.num_classes = num_classes
         self.in_channels = in_channels

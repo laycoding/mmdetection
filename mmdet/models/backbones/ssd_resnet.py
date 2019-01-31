@@ -43,11 +43,11 @@ class SSDResNet(ResNet):
     """
     # Arch_setting with extra residual conv layers
     Arch_settings = {
-        18: (BasicBlock, (2, 2, 2, 2)),
-        34: (BasicBlock, (3, 4, 6, 3)),
-        50: (Bottleneck, (3, 4, 6, 3)),
-        101: (Bottleneck, (3, 4, 23, 3)),
-        152: (Bottleneck, (3, 8, 36, 3))
+        18: (BasicBlock, (2, 2, 2, 2, 1)),
+        34: (BasicBlock, (3, 4, 6, 3, 1)),
+        50: (Bottleneck, (3, 4, 6, 3, 1)),
+        101: (Bottleneck, (3, 4, 23, 3, 1)),
+        152: (Bottleneck, (3, 8, 36, 3, 1))
     }
     def __init__(self, input_size, l2_norm_scale=20., **kwargs):
         super(SSDResNet, self).__init__(**kwargs)

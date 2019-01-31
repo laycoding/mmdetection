@@ -7,7 +7,7 @@ from mmdet.core import bbox2result
 
 
 @DETECTORS.register_module
-class RefindDet(BaseDetector):
+class RefineDet(BaseDetector):
 
     def __init__(self,
                  backbone,
@@ -16,7 +16,7 @@ class RefindDet(BaseDetector):
                  train_cfg=None,
                  test_cfg=None,
                  pretrained=None):
-        super(RefindDet, self).__init__()
+        super(RefineDet, self).__init__()
         self.backbone = builder.build_backbone(backbone)
         if neck is not None:
             self.neck = builder.build_neck(neck)
@@ -26,7 +26,7 @@ class RefindDet(BaseDetector):
         self.init_weights(pretrained=pretrained)
 
     def init_weights(self, pretrained=None):
-        super(RefindDet, self).init_weights(pretrained)
+        super(RefineDet, self).init_weights(pretrained)
         self.backbone.init_weights(pretrained=pretrained)
         if self.with_neck:
             if isinstance(self.neck, nn.Sequential):
