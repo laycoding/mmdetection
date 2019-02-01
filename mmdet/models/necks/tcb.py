@@ -24,8 +24,6 @@ class TCB(FPN):
         self.out_channels = out_channels
         self.num_ins = len(in_channels)
         self.num_outs = num_outs
-        # self.activation = activation
-        # self.with_bias = normalize is None
 
         if end_level == -1:
             self.end_level = self.num_ins + 1
