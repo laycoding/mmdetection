@@ -26,7 +26,7 @@ class TCB(FPN):
         self.num_outs = num_outs
 
         if end_level == -1:
-            self.end_level = self.num_ins + 1
+            self.end_level = self.num_ins
             assert num_outs >= self.num_ins - start_level
         else:
             # if end_level < inputs, no extra level is allowed

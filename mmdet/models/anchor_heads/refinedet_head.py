@@ -23,8 +23,10 @@ class RefineDetHead(AnchorHead):
                  basesize_ratio_range=(0.1, 0.9),
                  anchor_ratios=([2], [2], [2], [2]),
                  target_means=(.0, .0, .0, .0),
-                 target_stds=(1.0, 1.0, 1.0, 1.0)):
+                 target_stds=(1.0, 1.0, 1.0, 1.0),
+                 objectness_score=0.01):
         super(AnchorHead, self).__init__()
+        self.objectness_score = objectness_score
         self.input_size = input_size
         self.num_classes = num_classes
         self.in_channels = in_channels
@@ -137,7 +139,7 @@ class RefineDetHead(AnchorHead):
 
         return arm_cls_scores, arm_bbox_preds, odm_cls_scores, odm_bbox_preds
 
-    def loss_single(self, cls_score, bbox_pred, labels, label_weights,
+    def multiboxloss_single(self, cls_score, bbox_pred, labels, label_weights,
                     bbox_targets, bbox_weights, num_total_samples, cfg):
         loss_cls_all = F.cross_entropy(
             cls_score, labels, reduction='none') * label_weights
@@ -161,25 +163,54 @@ class RefineDetHead(AnchorHead):
             avg_factor=num_total_samples)
         return loss_cls[None], loss_reg
 
-    def loss(self, cls_scores, bbox_preds, gt_bboxes, gt_labels, img_metas,
-             cfg):
+    def multiboxloss(self, cls_scores, bbox_preds, gt_bboxes, gt_labels, img_metas,
+             cfg, use_arm=False, arm_cls_scores=None, arm_bbox_preds=None):
+        if arm_bbox_preds is None or arm_cls_scores is None:
+            assert use_arm==False
         featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
         assert len(featmap_sizes) == len(self.anchor_generators)
 
         anchor_list, valid_flag_list = self.get_anchors(
             featmap_sizes, img_metas)
-        cls_reg_targets = anchor_target(
-            anchor_list,
-            valid_flag_list,
-            gt_bboxes,
-            img_metas,
-            self.target_means,
-            self.target_stds,
-            cfg,
-            gt_labels_list=gt_labels,
-            label_channels=1,
-            sampling=False,
-            unmap_outputs=False)
+        if not use_arm:
+            cls_reg_targets = anchor_target(
+                anchor_list,
+                valid_flag_list,
+                gt_bboxes,
+                img_metas,
+                self.target_means,
+                self.target_stds,
+                cfg,
+                gt_labels_list=gt_labels,
+                label_channels=1,
+                sampling=False,
+                unmap_outputs=False)
+        else:
+            #arrange the prediction
+            num_images = len(img_metas)
+            arm_cls_scores = torch.cat([
+                s.permute(0, 2, 3, 1).reshape(
+                    num_images, -1, self.cls_out_channels) for s in arm_cls_scores
+            ], 1)
+            # [num_imgs, preds, num_classes]
+            all_bbox_preds = torch.cat([
+                b.permute(0, 2, 3, 1).reshape(num_images, -1, 4)
+                for b in bbox_preds
+            ], -2)
+            # [num_imgs, preds, 4]
+            # get the refined anchors, filter and assign them to gt using arm prediction
+            # cls_reg_targets = refined_anchor_target(
+            #     anchor_list,
+            #     valid_flag_list,
+            #     gt_bboxes,
+            #     img_metas,
+            #     self.target_means,
+            #     self.target_stds,
+            #     cfg,
+            #     gt_labels_list=gt_labels,
+            #     label_channels=1,
+            #     sampling=False,
+            #     unmap_outputs=False)          
         if cls_reg_targets is None:
             return None
         (labels_list, label_weights_list, bbox_targets_list, bbox_weights_list,
@@ -203,7 +234,7 @@ class RefineDetHead(AnchorHead):
             num_images, -1, 4)
 
         losses_cls, losses_reg = multi_apply(
-            self.loss_single,
+            self.multiboxloss_single,
             all_cls_scores,
             all_bbox_preds,
             all_labels,
@@ -213,6 +244,20 @@ class RefineDetHead(AnchorHead):
             num_total_samples=num_total_pos,
             cfg=cfg)
         return dict(loss_cls=losses_cls, loss_reg=losses_reg)
+
+    def loss(self, arm_cls_scores, arm_bbox_preds, odm_cls_scores, odm_bbox_preds,
+             gt_bboxes, gt_labels, img_metas, cfg):
+        arm_losses = self.multiboxloss(arm_cls_scores, arm_bbox_preds,
+                                         gt_bboxes, gt_labels, img_metas, cfg)
+        odm_losses = self.multiboxloss(odm_cls_scores, odm_bbox_preds,
+                                         gt_bboxes, gt_labels, img_metas, cfg,
+                                         use_arm=True, arm_cls_scores=arm_cls_scores,
+                                         arm_bbox_preds=arm_bbox_preds)
+
+        return dict(arm_loss_cls=arm_losses['losses_cls'],
+                     arm_loss_reg=arm_losses['losses_reg'],
+                     odm_loss_cls=odm_losses['losses_cls'],
+                     odm_loss_reg=odm_losses['losses_reg'])
 
     def get_bboxes(self, cls_scores, bbox_preds, img_metas, cfg,
                    rescale=False):
