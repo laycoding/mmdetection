@@ -12,7 +12,7 @@ from mmcv.runner import load_checkpoint
 from mmdet.ops import DeformConv, ModulatedDeformConv
 from ..registry import BACKBONES
 from ..utils import build_norm_layer
-from .resnet import ResNet, Bottleneck, BasicBlock
+from .resnet import ResNet, Bottleneck, BasicBlock, make_res_layer
 
 @BACKBONES.register_module
 class SSDResNet(ResNet):
@@ -41,13 +41,13 @@ class SSDResNet(ResNet):
         l2_norm_scale (float): Used to norm the feats from different level
 
     """
-    # Arch_setting with extra residual conv layers
-    Arch_settings = {
-        18: (BasicBlock, (2, 2, 2, 2, 1)),
-        34: (BasicBlock, (3, 4, 6, 3, 1)),
-        50: (Bottleneck, (3, 4, 6, 3, 1)),
-        101: (Bottleneck, (3, 4, 23, 3, 1)),
-        152: (Bottleneck, (3, 8, 36, 3, 1))
+    '''Cause the origin paper the extra conv layer do not follow the backbone 
+    plane expansion rule, that's also the main reason why this file exists.
+    the format of setting dict: (block_type, num_block, out_plane, stride)
+    '''
+    extra_setting = {
+        300: (BasicBlock, 1, 512, 2),
+        512: (Bottleneck, 2, 512, 2),
     }
     def __init__(self, input_size, l2_norm_scale=20., **kwargs):
         super(SSDResNet, self).__init__(**kwargs)
@@ -57,6 +57,7 @@ class SSDResNet(ResNet):
         for name, module in self.named_children():
             if name.endswith("layer"+str(self.out_indices[0]+1)):
                 norm_channel_dim = module[-1].conv3.out_channels
+        self.extra = self._make_extra_conv(self.extra_setting[input_size])
         if l2_norm_scale is None:
             self.l2_norm_scale = None
         else:
@@ -87,6 +88,13 @@ class SSDResNet(ResNet):
                         constant_init(m.norm2, 0)
         else:
             raise TypeError('pretrained must be a str or None')
+        # init the extra conv extra
+        for extra_conv in self.extra.modules():
+            if isinstance(extra_conv, nn.Conv2d):
+                kaiming_init(extra_conv)
+            elif isinstance(extra_conv, (nn.BatchNorm2d, nn.GroupNorm)):
+                constant_init(extra_conv, 1)
+
         if self.l2_norm_scale is not None:
             constant_init(self.l2_norm, self.l2_norm.scale)
 
@@ -101,6 +109,9 @@ class SSDResNet(ResNet):
             x = res_layer(x)
             if i in self.out_indices:
                 outs.append(x)
+        for i, layer in enumerate(self.extra):
+            x = layer(x)
+            outs.append(x)
         #norm the first stage
         if self.l2_norm_scale is not None:
             outs[0] = self.l2_norm(outs[0])
@@ -109,6 +120,21 @@ class SSDResNet(ResNet):
         else:
             return tuple(outs)
 
+    def _make_extra_layers(self, extra_setting):
+        block_type, num_blocks, out_planes, stride = extra_setting(self.input_size)
+        extra_layer = make_res_layer(block_type,
+                   self.inplanes,
+                   out_planes,
+                   num_blocks,
+                   stride=stride,
+                   dilation=1,
+                   style='pytorch',
+                   normalize=dict(type='BN'),
+                   dcn=stage_with_dcn[self.num_stages-1])
+        # meaningless ops, just for extensionable
+        self.inplanes = planes * self.block.expansion
+
+        return extra_layer
 
 class L2Norm(nn.Module):
 
