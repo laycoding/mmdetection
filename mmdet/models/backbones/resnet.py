@@ -302,11 +302,11 @@ class ResNet(nn.Module):
     """
 
     arch_settings = {
-        18: (BasicBlock, (2, 2, 2, 2, 1)),
-        34: (BasicBlock, (3, 4, 6, 3, 1)),
-        50: (Bottleneck, (3, 4, 6, 3, 1)),
-        101: (Bottleneck, (3, 4, 23, 3, 1)),
-        152: (Bottleneck, (3, 8, 36, 3, 1))
+        18: (BasicBlock, (2, 2, 2, 2)),
+        34: (BasicBlock, (3, 4, 6, 3)),
+        50: (Bottleneck, (3, 4, 6, 3)),
+        101: (Bottleneck, (3, 4, 23, 3)),
+        152: (Bottleneck, (3, 8, 36, 3))
     }
 
     def __init__(self,
