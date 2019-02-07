@@ -4,13 +4,26 @@ from mmcv.cnn import xavier_init
 
 from ..utils import ConvModule
 from ..registry import NECKS
-from ..backbones import BasicBlock
+from ..backbones import BasicBlock, make_res_layer
 from .fpn import FPN
 
 
 @NECKS.register_module
 class TCB(FPN):
-
+    '''transform block in refinedet, 
+            conv
+            relu
+            conv
+            ↓
+            + ← upsample
+            ↓
+            relu
+            conv
+    '''
+    # tcb_setting = {
+    #     300: (BasicBlock, 1, 128, 2),
+    #     512: (Bottleneck, 2, 128, 2),
+    # }
     def __init__(self,
                  in_channels,
                  out_channels,
@@ -39,9 +52,15 @@ class TCB(FPN):
         self.fpn_convs = nn.ModuleList()
 
         for i in range(self.start_level, self.end_level):
-            l_conv = BasicBlock(
-                in_channels[i],
-                out_channels)
+            # TCB block
+            l_conv = make_res_layer(TCBBlock,
+               in_channels[i],
+               out_channels,
+               1,
+               stride=1,
+               dilation=1,
+               style='pytorch',
+               normalize=dict(type='BN'))
             #NB: diff from the origin paper,we use simple 3x3 conv instead of residual block
             fpn_conv = ConvModule(
                 out_channels,
@@ -87,3 +106,55 @@ class TCB(FPN):
         ]
 
         return tuple(outs)
+
+class TCBBlock(nn.Module):
+    expansion = 1
+
+    def __init__(self,
+                 inplanes,
+                 planes,
+                 stride=1,
+                 dilation=1,
+                 downsample=None,
+                 style='pytorch',
+                 with_cp=False,
+                 normalize=dict(type='BN'),
+                 dcn=None):
+        super(TCBBlock, self).__init__()
+
+        self.norm1_name, norm1 = build_norm_layer(normalize, planes, postfix=1)
+
+        self.conv1 = conv3x3(inplanes, planes, stride, dilation)
+        self.add_module(self.norm1_name, norm1)
+        self.conv2 = conv3x3(planes, planes)
+        # self.add_module(self.norm2_name, norm2)
+
+        self.relu = nn.ReLU(inplace=True)
+        self.downsample = downsample
+        self.stride = stride
+        self.dilation = dilation
+        assert not with_cp
+
+    @property
+    def norm1(self):
+        return getattr(self, self.norm1_name)
+
+    @property
+    def norm2(self):
+        return getattr(self, self.norm2_name)
+
+    def forward(self, x):
+        identity = x
+
+        out = self.conv1(x)
+        out = self.norm1(out)
+        out = self.relu(out)
+
+        out = self.conv2(out)
+
+        if self.downsample is not None:
+            identity = self.downsample(x)
+
+        out += identity
+
+        return out

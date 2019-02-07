@@ -43,11 +43,11 @@ class SSDResNet(ResNet):
     """
     '''Cause the origin paper the extra conv layer do not follow the backbone 
     plane expansion rule, that's also the main reason why this file exists.
-    the format of setting dict: (block_type, num_block, out_plane, stride)
+    the format of setting dict: (block_type, num_block, out_planes/expansion, stride)
     '''
     extra_setting = {
-        300: (BasicBlock, 1, 512, 2),
-        512: (Bottleneck, 2, 512, 2),
+        300: (BasicBlock, 1, 128, 2),
+        512: (Bottleneck, 2, 128, 2),
     }
     def __init__(self, input_size, l2_norm_scale=20., **kwargs):
         super(SSDResNet, self).__init__(**kwargs)
@@ -57,7 +57,7 @@ class SSDResNet(ResNet):
         for name, module in self.named_children():
             if name.endswith("layer"+str(self.out_indices[0]+1)):
                 norm_channel_dim = module[-1].conv3.out_channels
-        self.extra = self._make_extra_conv(self.extra_setting[input_size])
+        self.extra = self._make_extra_convs(self.extra_setting[input_size])
         if l2_norm_scale is None:
             self.l2_norm_scale = None
         else:
@@ -109,9 +109,11 @@ class SSDResNet(ResNet):
             x = res_layer(x)
             if i in self.out_indices:
                 outs.append(x)
+        #NB: only support one extra stage as the origin paper
         for i, layer in enumerate(self.extra):
             x = layer(x)
-            outs.append(x)
+            if i+1==len(self.extra):
+                outs.append(x)
         #norm the first stage
         if self.l2_norm_scale is not None:
             outs[0] = self.l2_norm(outs[0])
@@ -120,8 +122,9 @@ class SSDResNet(ResNet):
         else:
             return tuple(outs)
 
-    def _make_extra_layers(self, extra_setting):
-        block_type, num_blocks, out_planes, stride = extra_setting(self.input_size)
+    def _make_extra_convs(self, extra_setting):
+        block_type, num_blocks, out_planes, stride = extra_setting
+        dcn = self.dcn if self.stage_with_dcn[self.num_stages-1] else None
         extra_layer = make_res_layer(block_type,
                    self.inplanes,
                    out_planes,
@@ -130,9 +133,9 @@ class SSDResNet(ResNet):
                    dilation=1,
                    style='pytorch',
                    normalize=dict(type='BN'),
-                   dcn=stage_with_dcn[self.num_stages-1])
+                   dcn=dcn)
         # meaningless ops, just for extensionable
-        self.inplanes = planes * self.block.expansion
+        self.inplanes = out_planes * self.block.expansion
 
         return extra_layer
 
