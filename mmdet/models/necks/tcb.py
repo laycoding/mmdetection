@@ -2,9 +2,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.cnn import xavier_init
 
-from ..utils import ConvModule
+from ..utils import ConvModule, build_norm_layer
 from ..registry import NECKS
-from ..backbones import BasicBlock, make_res_layer
+from ..backbones import BasicBlock
+from ..backbones.resnet import make_res_layer, conv3x3
 from .fpn import FPN
 
 
@@ -127,7 +128,6 @@ class TCBBlock(nn.Module):
         self.conv1 = conv3x3(inplanes, planes, stride, dilation)
         self.add_module(self.norm1_name, norm1)
         self.conv2 = conv3x3(planes, planes)
-        # self.add_module(self.norm2_name, norm2)
 
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
@@ -138,10 +138,6 @@ class TCBBlock(nn.Module):
     @property
     def norm1(self):
         return getattr(self, self.norm1_name)
-
-    @property
-    def norm2(self):
-        return getattr(self, self.norm2_name)
 
     def forward(self, x):
         identity = x

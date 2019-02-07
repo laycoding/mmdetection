@@ -18,7 +18,7 @@ class RefineDetHead(AnchorHead):
     def __init__(self,
                  input_size=300,
                  num_classes=81,
-                 in_channels=([512, 256], [1024, 256], [512, 256], [256, 256]),
+                 in_channels=([512, 256], [1024, 256], [2048, 256], [512, 256]),
                  anchor_strides=(8, 16, 32, 64),
                  basesize_ratio_range=(0.1, 0.9),
                  anchor_ratios=([2], [2], [2], [2]),
@@ -134,8 +134,8 @@ class RefineDetHead(AnchorHead):
         odm_bbox_preds = []
         for odm_feat, odm_reg_conv, odm_cls_conv in zip(refined_feats, self.odm_reg_convs,
                                             self.odm_cls_convs):
-            odm_cls_scores.append(arm_cls_conv(odm_feat))
-            odm_bbox_preds.append(arm_reg_conv(odm_feat))
+            odm_cls_scores.append(odm_cls_conv(odm_feat))
+            odm_bbox_preds.append(odm_reg_conv(odm_feat))
 
         return arm_cls_scores, arm_bbox_preds, odm_cls_scores, odm_bbox_preds
 
