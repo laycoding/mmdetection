@@ -21,7 +21,7 @@ class RefineDetHead(AnchorHead):
                  in_channels=([512, 256], [1024, 256], [2048, 256], [512, 256]),
                  anchor_strides=(8, 16, 32, 64),
                  basesize_ratio_range=(0.1, 0.9),
-                 anchor_ratios=([2], [2], [2], [2]),
+                 anchor_ratios=([2], [2, 3], [2, 3], [2]),
                  target_means=(.0, .0, .0, .0),
                  target_stds=(1.0, 1.0, 1.0, 1.0),
                  objectness_score=0.01):
@@ -77,6 +77,7 @@ class RefineDetHead(AnchorHead):
             min_sizes.append(int(input_size * r / 100))
             max_sizes.append(int(input_size * (r + step) / 100))
         if input_size == 300:
+            assert basesize_ratio_range[0] in [0.15, 0.2]
             if basesize_ratio_range[0] == 0.15:  # SSD300 COCO
                 min_sizes.insert(0, int(input_size * 7 / 100))
                 max_sizes.insert(0, int(input_size * 15 / 100))
@@ -84,6 +85,7 @@ class RefineDetHead(AnchorHead):
                 min_sizes.insert(0, int(input_size * 10 / 100))
                 max_sizes.insert(0, int(input_size * 20 / 100))
         elif input_size == 512:
+            assert basesize_ratio_range[0] in [0.1, 0.15]
             if basesize_ratio_range[0] == 0.1:  # SSD512 COCO
                 min_sizes.insert(0, int(input_size * 4 / 100))
                 max_sizes.insert(0, int(input_size * 10 / 100))
@@ -165,6 +167,13 @@ class RefineDetHead(AnchorHead):
 
     def multiboxloss(self, cls_scores, bbox_preds, gt_bboxes, gt_labels, img_metas,
              cfg, use_arm=False, arm_cls_scores=None, arm_bbox_preds=None):
+        torch.save(cls_scores, "inters/cls_scores.pt")
+        torch.save(bbox_preds, "inters/bbox_preds.pt")
+        torch.save(gt_bboxes, "inters/gt_bboxes.pt")
+        torch.save(gt_labels, "inters/gt_labels.pt")
+        torch.save(img_metas, "inters/img_metas.pt")
+        torch.save(cfg, "inters/cfg.pt")
+        assert 0
         if arm_bbox_preds is None or arm_cls_scores is None:
             assert use_arm==False
         featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
@@ -217,11 +226,20 @@ class RefineDetHead(AnchorHead):
          num_total_pos, num_total_neg) = cls_reg_targets
 
         num_images = len(img_metas)
-        all_cls_scores = torch.cat([
-            s.permute(0, 2, 3, 1).reshape(
-                num_images, -1, self.cls_out_channels) for s in cls_scores
-        ], 1)
-        all_labels = torch.cat(labels_list, -1).view(num_images, -1)
+        if not use_arm:
+            all_cls_scores = torch.cat([
+                s.permute(0, 2, 3, 1).reshape(
+                    num_images, -1, 2) for s in cls_scores
+            ], 1)
+            all_labels = torch.cat(labels_list, -1).view(num_images, -1)
+            all_labels[all_labels>0] = 1
+        else:
+            all_cls_scores = torch.cat([
+                s.permute(0, 2, 3, 1).reshape(
+                    num_images, -1, self.cls_out_channels) for s in cls_scores
+            ], 1)
+            all_labels = torch.cat(labels_list, -1).view(num_images, -1)
+             
         all_label_weights = torch.cat(label_weights_list, -1).view(
             num_images, -1)
         all_bbox_preds = torch.cat([
