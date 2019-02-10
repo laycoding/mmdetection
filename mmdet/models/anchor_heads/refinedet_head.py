@@ -167,13 +167,6 @@ class RefineDetHead(AnchorHead):
 
     def multiboxloss(self, cls_scores, bbox_preds, gt_bboxes, gt_labels, img_metas,
              cfg, use_arm=False, arm_cls_scores=None, arm_bbox_preds=None):
-        torch.save(cls_scores, "inters/cls_scores.pt")
-        torch.save(bbox_preds, "inters/bbox_preds.pt")
-        torch.save(gt_bboxes, "inters/gt_bboxes.pt")
-        torch.save(gt_labels, "inters/gt_labels.pt")
-        torch.save(img_metas, "inters/img_metas.pt")
-        torch.save(cfg, "inters/cfg.pt")
-        assert 0
         if arm_bbox_preds is None or arm_cls_scores is None:
             assert use_arm==False
         featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
@@ -192,34 +185,36 @@ class RefineDetHead(AnchorHead):
                 cfg,
                 gt_labels_list=gt_labels,
                 label_channels=1,
-                sampling=False,
+                sampling=False, 
                 unmap_outputs=False)
         else:
             #arrange the prediction
             num_images = len(img_metas)
             arm_cls_scores = torch.cat([
                 s.permute(0, 2, 3, 1).reshape(
-                    num_images, -1, self.cls_out_channels) for s in arm_cls_scores
+                    num_images, -1, 2) for s in arm_cls_scores
             ], 1)
             # [num_imgs, preds, num_classes]
-            all_bbox_preds = torch.cat([
+            arm_bbox_preds = torch.cat([
                 b.permute(0, 2, 3, 1).reshape(num_images, -1, 4)
-                for b in bbox_preds
+                for b in arm_bbox_preds
             ], -2)
             # [num_imgs, preds, 4]
             # get the refined anchors, filter and assign them to gt using arm prediction
-            # cls_reg_targets = refined_anchor_target(
-            #     anchor_list,
-            #     valid_flag_list,
-            #     gt_bboxes,
-            #     img_metas,
-            #     self.target_means,
-            #     self.target_stds,
-            #     cfg,
-            #     gt_labels_list=gt_labels,
-            #     label_channels=1,
-            #     sampling=False,
-            #     unmap_outputs=False)          
+            cls_reg_targets = refined_anchor_target(
+                anchor_list,
+                valid_flag_list,
+                gt_bboxes,
+                img_metas,
+                self.target_means,
+                self.target_stds,
+                cfg,
+                gt_labels_list=gt_labels,
+                label_channels=1,
+                sampling=False,
+                unmap_outputs=False,
+                arm_cls_scores=arm_cls_scores,
+                arm_bbox_preds=arm_bbox_preds)          
         if cls_reg_targets is None:
             return None
         (labels_list, label_weights_list, bbox_targets_list, bbox_weights_list,
@@ -239,7 +234,7 @@ class RefineDetHead(AnchorHead):
                     num_images, -1, self.cls_out_channels) for s in cls_scores
             ], 1)
             all_labels = torch.cat(labels_list, -1).view(num_images, -1)
-             
+
         all_label_weights = torch.cat(label_weights_list, -1).view(
             num_images, -1)
         all_bbox_preds = torch.cat([
