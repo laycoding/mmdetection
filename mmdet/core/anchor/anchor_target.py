@@ -2,6 +2,7 @@ import torch
 
 from ..bbox import assign_and_sample, build_assigner, PseudoSampler, bbox2delta
 from ..utils import multi_apply
+from ..bbox import delta2bbox
 
 
 def anchor_target(anchor_list,
@@ -205,8 +206,8 @@ def refined_anchor_target(anchor_list,
                   label_channels=1,
                   sampling=True,
                   unmap_outputs=True,
-                  arm_cls_scores=arm_cls_scores,
-                  arm_bbox_preds=arm_bbox_preds):
+                  arm_cls_scores=None,
+                  arm_bbox_preds=None):
     """Compute regression and classification targets for anchors.
 
     Args:
@@ -226,18 +227,26 @@ def refined_anchor_target(anchor_list,
 
     # anchor number of multi levels
     num_level_anchors = [anchors.size(0) for anchors in anchor_list[0]]
-    # concat all level anchors and flags to a single tensor
+    # concat all level anchors, flags and preds(in same image) to a single tensor
     for i in range(num_imgs):
         assert len(anchor_list[i]) == len(valid_flag_list[i])
         anchor_list[i] = torch.cat(anchor_list[i])
         valid_flag_list[i] = torch.cat(valid_flag_list[i])
-
+        cls_score_list = [
+            arm_cls_scores[i].detach() for i in range(4)
+        ]
+        bbox_pred_list = [
+            arm_bbox_preds[i].detach() for i in range(4)
+        ]
+    # where the refine refine
+    anchor_list = refine_anchor(anchor_list, arm_bbox_preds, img_metas, target_means, target_stds)
+    # valid_flag_list = filter_anchor(valid_flag_list)
     # compute targets for each image
     if gt_labels_list is None:
         gt_labels_list = [None for _ in range(num_imgs)]
     (all_labels, all_label_weights, all_bbox_targets, all_bbox_weights,
      pos_inds_list, neg_inds_list) = multi_apply(
-         refined_anchor_target_single,
+         anchor_target_single,
          anchor_list,
          valid_flag_list,
          gt_bboxes_list,
@@ -263,71 +272,12 @@ def refined_anchor_target(anchor_list,
     return (labels_list, label_weights_list, bbox_targets_list,
             bbox_weights_list, num_total_pos, num_total_neg)
 
-def refined_anchor_target_single(flat_anchors,
-                         valid_flags,
-                         gt_bboxes,
-                         gt_labels, 
-                         img_meta,
-                         target_means,
-                         target_stds,
-                         cfg,
-                         label_channels=1,
-                         sampling=True,
-                         unmap_outputs=True):
-    inside_flags = anchor_inside_flags(flat_anchors, valid_flags,
-                                       img_meta['img_shape'][:2],
-                                       cfg.allowed_border)
-    if not inside_flags.any():
-        return (None, ) * 6
-    # assign gt and sample anchors
-    anchors = flat_anchors[inside_flags, :]
-
-    if sampling:
-        assign_result, sampling_result = assign_and_sample(
-            anchors, gt_bboxes, None, None, cfg)
-    else:
-        bbox_assigner = build_assigner(cfg.assigner)
-        assign_result = bbox_assigner.assign(anchors, gt_bboxes, None,
-                                             gt_labels)
-        bbox_sampler = PseudoSampler()
-        sampling_result = bbox_sampler.sample(assign_result, anchors,
-                                              gt_bboxes)
-
-    num_valid_anchors = anchors.shape[0]
-    bbox_targets = torch.zeros_like(anchors)
-    bbox_weights = torch.zeros_like(anchors)
-    labels = anchors.new_zeros(num_valid_anchors, dtype=torch.long)
-    label_weights = anchors.new_zeros(num_valid_anchors, dtype=torch.float)
-
-    pos_inds = sampling_result.pos_inds
-    neg_inds = sampling_result.neg_inds
-    if len(pos_inds) > 0:
-        pos_bbox_targets = bbox2delta(sampling_result.pos_bboxes,
-                                      sampling_result.pos_gt_bboxes,
-                                      target_means, target_stds)
-        bbox_targets[pos_inds, :] = pos_bbox_targets
-        bbox_weights[pos_inds, :] = 1.0
-        if gt_labels is None:
-            labels[pos_inds] = 1
-        else:
-            labels[pos_inds] = gt_labels[sampling_result.pos_assigned_gt_inds]
-        if cfg.pos_weight <= 0:
-            label_weights[pos_inds] = 1.0
-        else:
-            label_weights[pos_inds] = cfg.pos_weight
-    if len(neg_inds) > 0:
-        label_weights[neg_inds] = 1.0
-
-    # map up to original set of anchors
-    if unmap_outputs:
-        num_total_anchors = flat_anchors.size(0)
-        labels = unmap(labels, num_total_anchors, inside_flags)
-        label_weights = unmap(label_weights, num_total_anchors, inside_flags)
-        if label_channels > 1:
-            labels, label_weights = expand_binary_labels(
-                labels, label_weights, label_channels)
-        bbox_targets = unmap(bbox_targets, num_total_anchors, inside_flags)
-        bbox_weights = unmap(bbox_weights, num_total_anchors, inside_flags)
-
-    return (labels, label_weights, bbox_targets, bbox_weights, pos_inds,
-            neg_inds)
+def refine_anchor(anchor_list, arm_bbox_preds, img_metas, target_means, target_stds):
+    new_anchor_list = []
+    for i in range(len(img_metas)):
+        new_anchor_list.append(delta2bbox((
+          anchor_list[i],
+          arm_bbox_preds[i], 
+          target_means, 
+          target_stds, 
+          img_metas[i]['img_shape'])))

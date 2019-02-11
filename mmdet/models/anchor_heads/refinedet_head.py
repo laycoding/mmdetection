@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.cnn import xavier_init
 
-from mmdet.core import (AnchorGenerator, anchor_target, weighted_smoothl1,
+from mmdet.core import (AnchorGenerator, anchor_target, refined_anchor_target, weighted_smoothl1,
                         multi_apply)
 from .anchor_head import AnchorHead
 from ..registry import HEADS
@@ -267,11 +267,11 @@ class RefineDetHead(AnchorHead):
                                          use_arm=True, arm_cls_scores=arm_cls_scores,
                                          arm_bbox_preds=arm_bbox_preds)
 
-        return dict(arm_loss_cls=arm_losses['losses_cls'],
-                     arm_loss_reg=arm_losses['losses_reg'],
-                     odm_loss_cls=odm_losses['losses_cls'],
-                     odm_loss_reg=odm_losses['losses_reg'])
-
+        return dict(arm_loss_cls=arm_losses['loss_cls'],
+                     arm_loss_reg=arm_losses['loss_reg'],
+                     odm_loss_cls=odm_losses['loss_cls'],
+                     odm_loss_reg=odm_losses['loss_reg'])
+    # detection out
     def get_bboxes(self, cls_scores, bbox_preds, img_metas, cfg,
                    rescale=False):
         assert len(cls_scores) == len(bbox_preds)

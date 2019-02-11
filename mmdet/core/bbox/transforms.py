@@ -37,6 +37,12 @@ def delta2bbox(rois,
                stds=[1, 1, 1, 1],
                max_shape=None,
                wh_ratio_clip=16 / 1000):
+    ''' really need to interpret how to use this function
+    rois:   num_anchors x 4, [x,  y,  w,  h ]
+    deltas: num_anchors x 4, [dx, dy, dw, dh]
+    NB: for some special task need to reset the wh_ratio limits
+    wh_ratio_clip: the limit of ratio, set default abs(ln(16/1000))(≈4.13)
+    '''
     means = deltas.new_tensor(means).repeat(1, deltas.size(1) // 4)
     stds = deltas.new_tensor(stds).repeat(1, deltas.size(1) // 4)
     denorm_deltas = deltas * stds + means
