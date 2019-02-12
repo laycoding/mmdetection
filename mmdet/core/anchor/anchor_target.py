@@ -240,7 +240,7 @@ def refined_anchor_target(anchor_list,
         ]
     # where the refine refine
     anchor_list = refine_anchor(anchor_list, arm_bbox_preds, img_metas, target_means, target_stds)
-    valid_flag_list = filter_anchor(valid_flag_list, arm_cls_scores)
+    # valid_flag_list = filter_anchor(valid_flag_list, arm_cls_scores)
     # compute targets for each image
     if gt_labels_list is None:
         gt_labels_list = [None for _ in range(num_imgs)]

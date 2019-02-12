@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from mmcv.cnn import xavier_init
 
 from mmdet.core import (AnchorGenerator, anchor_target, refined_anchor_target, weighted_smoothl1,
-                        multi_apply)
+                        multi_apply, delta2bbox, multiclass_nms)
 from .anchor_head import AnchorHead
 from ..registry import HEADS
 
@@ -274,11 +274,12 @@ class RefineDetHead(AnchorHead):
     # detection out
     def get_bboxes(self, arm_cls_scores, arm_bbox_preds, odm_cls_scores, odm_bbox_preds,
                  img_metas, cfg, rescale=False):
-        assert len(cls_scores) == len(bbox_preds)
-        num_levels = len(cls_scores)
+        assert len(arm_cls_scores) == len(arm_bbox_preds)
+        assert len(odm_cls_scores) == len(odm_bbox_preds)
+        num_levels = len(arm_cls_scores)
 
         mlvl_anchors = [
-            self.anchor_generators[i].grid_anchors(cls_scores[i].size()[-2:],
+            self.anchor_generators[i].grid_anchors(arm_cls_scores[i].size()[-2:],
                                                    self.anchor_strides[i])
             for i in range(num_levels)
         ]
@@ -315,11 +316,11 @@ class RefineDetHead(AnchorHead):
                           scale_factor,
                           cfg,
                           rescale=False):
-        assert len(mlvl_anchors) == len(arm_bbox_preds) == len(arm_cls_scores)
+        assert len(mlvl_anchors) == len(arm_bbox_preds) == len(arm_cls_scores) \
                                  == len(odm_cls_scores) == len(odm_bbox_preds)
         mlvl_bboxes = []
         mlvl_scores = []
-        for arm_cls_score, arm_bbox_pred, odmm_cls_score, odm_bbox_pred, anchors in zip(arm_cls_scores,
+        for arm_cls_score, arm_bbox_pred, odm_cls_score, odm_bbox_pred, anchors in zip(arm_cls_scores,
                 arm_bbox_preds, odm_cls_scores, odm_bbox_preds, mlvl_anchors):
             # NB: do this postprocess in every single img
             assert arm_cls_score.size()[-2:] == arm_bbox_pred.size()[-2:]
@@ -337,7 +338,7 @@ class RefineDetHead(AnchorHead):
             # filter anchors by arm objectness score
             arm_max_scores, _ = arm_scores[:, 1:].max(dim=1)
             odm_scores[arm_max_scores<=self.objectness_score] = 0
-            # decode the arm box pred, TODO@laycoding prefilter before decode the arm pred
+            # decode the arm box pred, TODO@laycoding pre filter before decode the arm pred
             # NB: delta2bbox will clamp the anchor inside the pic which may affect the performance
             arm_bboxes = delta2bbox(anchors, arm_bbox_pred, self.target_means,
                     self.target_stds, img_shape)
@@ -351,7 +352,7 @@ class RefineDetHead(AnchorHead):
             bboxes = delta2bbox(arm_bboxes, odm_bbox_pred, self.target_means,
                                 self.target_stds, img_shape)
             mlvl_bboxes.append(bboxes)
-            mlvl_scores.append(scores)
+            mlvl_scores.append(odm_scores)
         mlvl_bboxes = torch.cat(mlvl_bboxes)
         if rescale:
             mlvl_bboxes /= mlvl_bboxes.new_tensor(scale_factor)

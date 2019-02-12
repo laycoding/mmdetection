@@ -46,7 +46,7 @@ class SSDResNet(ResNet):
     the format of setting dict: (block_type, num_block, out_planes/expansion, stride)
     '''
     extra_setting = {
-        300: (BasicBlock, 1, 128, 2),
+        300: (Bottleneck, 1, 128, 2),
         512: (Bottleneck, 2, 128, 2),
     }
     def __init__(self, input_size, l2_norm_scale=20., **kwargs):
@@ -61,6 +61,7 @@ class SSDResNet(ResNet):
         if l2_norm_scale is None:
             self.l2_norm_scale = None
         else:
+            self.l2_norm_scale = l2_norm_scale
             self.l2_norm = L2Norm(norm_channel_dim, l2_norm_scale)
 
     def init_weights(self, pretrained=None):
