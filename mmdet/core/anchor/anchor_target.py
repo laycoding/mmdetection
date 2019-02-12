@@ -285,10 +285,10 @@ def refine_anchor(anchor_list, arm_bbox_preds, img_metas, target_means, target_s
 
 def filter_anchor(valid_flag_list, arm_cls_scores, objectness_score=0.01):
     new_valid_flag_list = []
-    for i in range(len(img_metas)):
-        scores = cls_score_list[i].softmax(-1)
+    for i in range(len(valid_flag_list)):
+        scores = arm_cls_scores[i].softmax(-1)
         max_scores, _ = scores[:, 1:].max(dim=1)
-        new_valid_flag_list.append(
-            valid_flag_list[i][max_scores<=objectness_score]=0)
+        valid_flag_list[i][max_scores<=objectness_score]=0
+        new_valid_flag_list.append(valid_flag_list[i])
     return new_valid_flag_list
 

@@ -272,8 +272,8 @@ class RefineDetHead(AnchorHead):
                      odm_loss_cls=odm_losses['loss_cls'],
                      odm_loss_reg=odm_losses['loss_reg'])
     # detection out
-    def get_bboxes(self, cls_scores, bbox_preds, img_metas, cfg,
-                   rescale=False):
+    def get_bboxes(self, arm_cls_scores, arm_bbox_preds, odm_cls_scores, odm_bbox_preds,
+                 img_metas, cfg, rescale=False):
         assert len(cls_scores) == len(bbox_preds)
         num_levels = len(cls_scores)
 
@@ -284,52 +284,71 @@ class RefineDetHead(AnchorHead):
         ]
         result_list = []
         for img_id in range(len(img_metas)):
-            cls_score_list = [
-                cls_scores[i][img_id].detach() for i in range(num_levels)
+            arm_cls_score_list = [
+                arm_cls_scores[i][img_id].detach() for i in range(num_levels)
             ]
-            bbox_pred_list = [
-                bbox_preds[i][img_id].detach() for i in range(num_levels)
+            arm_bbox_pred_list = [
+                arm_bbox_preds[i][img_id].detach() for i in range(num_levels)
+            ]
+            odm_cls_score_list = [
+                odm_cls_scores[i][img_id].detach() for i in range(num_levels)
+            ]
+            odm_bbox_pred_list = [
+                odm_bbox_preds[i][img_id].detach() for i in range(num_levels)
             ]
             img_shape = img_metas[img_id]['img_shape']
             scale_factor = img_metas[img_id]['scale_factor']
-            proposals = self.get_bboxes_single(cls_score_list, bbox_pred_list,
+            proposals = self.get_bboxes_single(arm_cls_score_list, arm_bbox_pred_list,
+                                               odm_cls_score_list, odm_bbox_pred_list,
                                                mlvl_anchors, img_shape,
                                                scale_factor, cfg, rescale)
             result_list.append(proposals)
         return result_list
 
     def get_bboxes_single(self,
-                          cls_scores,
-                          bbox_preds,
+                          arm_cls_scores,
+                          arm_bbox_preds,
+                          odm_cls_scores,
+                          odm_bbox_preds,
                           mlvl_anchors,
                           img_shape,
                           scale_factor,
                           cfg,
                           rescale=False):
-        assert len(cls_scores) == len(bbox_preds) == len(mlvl_anchors)
+        assert len(mlvl_anchors) == len(arm_bbox_preds) == len(arm_cls_scores)
+                                 == len(odm_cls_scores) == len(odm_bbox_preds)
         mlvl_bboxes = []
         mlvl_scores = []
-        for cls_score, bbox_pred, anchors in zip(cls_scores, bbox_preds,
-                                                 mlvl_anchors):
-            assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
-            cls_score = cls_score.permute(1, 2, 0).reshape(
+        for arm_cls_score, arm_bbox_pred, odmm_cls_score, odm_bbox_pred, anchors in zip(arm_cls_scores,
+                arm_bbox_preds, odm_cls_scores, odm_bbox_preds, mlvl_anchors):
+            # NB: do this postprocess in every single img
+            assert arm_cls_score.size()[-2:] == arm_bbox_pred.size()[-2:]
+            assert odm_cls_score.size()[-2:] == odm_bbox_pred.size()[-2:]
+            arm_cls_score = arm_cls_score.permute(1, 2, 0).reshape(
+                -1, 2)
+            odm_cls_score = odm_cls_score.permute(1, 2, 0).reshape(
                 -1, self.cls_out_channels)
-            if self.use_sigmoid_cls:
-                scores = cls_score.sigmoid()
-            else:
-                scores = cls_score.softmax(-1)
-            bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 4)
+
+            assert self.use_sigmoid_cls is False
+            arm_scores = arm_cls_score.softmax(-1)
+            odm_scores = odm_cls_score.softmax(-1)
+            arm_bbox_pred = arm_bbox_pred.permute(1, 2, 0).reshape(-1, 4)
+            odm_bbox_pred = odm_bbox_pred.permute(1, 2, 0).reshape(-1, 4)
+            # filter anchors by arm objectness score
+            arm_max_scores, _ = arm_scores[:, 1:].max(dim=1)
+            odm_scores[arm_max_scores<=self.objectness_score] = 0
+            # decode the arm box pred, TODO@laycoding prefilter before decode the arm pred
+            # NB: delta2bbox will clamp the anchor inside the pic which may affect the performance
+            arm_bboxes = delta2bbox(anchors, arm_bbox_pred, self.target_means,
+                    self.target_stds, img_shape)
             nms_pre = cfg.get('nms_pre', -1)
-            if nms_pre > 0 and scores.shape[0] > nms_pre:
-                if self.use_sigmoid_cls:
-                    max_scores, _ = scores.max(dim=1)
-                else:
-                    max_scores, _ = scores[:, 1:].max(dim=1)
+            if nms_pre > 0 and odm_scores.shape[0] > nms_pre:
+                max_scores, _ = odm_scores[:, 1:].max(dim=1)
                 _, topk_inds = max_scores.topk(nms_pre)
-                anchors = anchors[topk_inds, :]
-                bbox_pred = bbox_pred[topk_inds, :]
-                scores = scores[topk_inds, :]
-            bboxes = delta2bbox(anchors, bbox_pred, self.target_means,
+                arm_bboxes = arm_bboxes[topk_inds, :]
+                odm_bbox_pred = odm_bbox_pred[topk_inds, :]
+                odm_scores = odm_scores[topk_inds, :]
+            bboxes = delta2bbox(arm_bboxes, odm_bbox_pred, self.target_means,
                                 self.target_stds, img_shape)
             mlvl_bboxes.append(bboxes)
             mlvl_scores.append(scores)
@@ -337,9 +356,7 @@ class RefineDetHead(AnchorHead):
         if rescale:
             mlvl_bboxes /= mlvl_bboxes.new_tensor(scale_factor)
         mlvl_scores = torch.cat(mlvl_scores)
-        if self.use_sigmoid_cls:
-            padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
-            mlvl_scores = torch.cat([padding, mlvl_scores], dim=1)
+
         det_bboxes, det_labels = multiclass_nms(
             mlvl_bboxes, mlvl_scores, cfg.score_thr, cfg.nms, cfg.max_per_img)
         return det_bboxes, det_labels
