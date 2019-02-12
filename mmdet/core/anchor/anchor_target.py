@@ -217,7 +217,7 @@ def refined_anchor_target(anchor_list,
         img_metas (list[dict]): Meta info of each image.
         target_means (Iterable): Mean value of regression targets.
         target_stds (Iterable): Std value of regression targets.
-        cfg (dict): RPN train configs.
+        cfg (dict): Refinedet train configs.
 
     Returns:
         tuple
@@ -240,7 +240,7 @@ def refined_anchor_target(anchor_list,
         ]
     # where the refine refine
     anchor_list = refine_anchor(anchor_list, arm_bbox_preds, img_metas, target_means, target_stds)
-    # valid_flag_list = filter_anchor(valid_flag_list)
+    valid_flag_list = filter_anchor(valid_flag_list, arm_cls_scores)
     # compute targets for each image
     if gt_labels_list is None:
         gt_labels_list = [None for _ in range(num_imgs)]
@@ -275,9 +275,20 @@ def refined_anchor_target(anchor_list,
 def refine_anchor(anchor_list, arm_bbox_preds, img_metas, target_means, target_stds):
     new_anchor_list = []
     for i in range(len(img_metas)):
-        new_anchor_list.append(delta2bbox((
+        new_anchor_list.append(delta2bbox(
           anchor_list[i],
           arm_bbox_preds[i], 
           target_means, 
           target_stds, 
-          img_metas[i]['img_shape'])))
+          img_metas[i]['img_shape']))
+    return new_anchor_list
+
+def filter_anchor(valid_flag_list, arm_cls_scores, objectness_score=0.01):
+    new_valid_flag_list = []
+    for i in range(len(img_metas)):
+        scores = cls_score_list[i].softmax(-1)
+        max_scores, _ = scores[:, 1:].max(dim=1)
+        new_valid_flag_list.append(
+            valid_flag_list[i][max_scores<=objectness_score]=0)
+    return new_valid_flag_list
+
