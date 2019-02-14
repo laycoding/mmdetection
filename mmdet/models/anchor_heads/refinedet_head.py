@@ -18,13 +18,14 @@ class RefineDetHead(AnchorHead):
     def __init__(self,
                  input_size=300,
                  num_classes=81,
-                 in_channels=([512, 256], [1024, 256], [2048, 256], [512, 256]),
+                 in_channels=([512, 256], [1024, 256], [512, 256], [256, 256]),
                  anchor_strides=(8, 16, 32, 64),
-                 basesize_ratio_range=(0.1, 0.9),
                  anchor_ratios=([2], [2, 3], [2, 3], [2]),
                  target_means=(.0, .0, .0, .0),
                  target_stds=(1.0, 1.0, 1.0, 1.0),
-                 objectness_score=0.01):
+                 objectness_score=0.01,
+                 min_sizes=[30, 64, 128, 256],
+                 max_sizes=[64, 128, 256, 315]):
         super(AnchorHead, self).__init__()
         self.objectness_score = objectness_score
         self.input_size = input_size
@@ -66,32 +67,35 @@ class RefineDetHead(AnchorHead):
         self.odm_reg_convs = nn.ModuleList(odm_reg_convs)
         self.odm_cls_convs = nn.ModuleList(odm_cls_convs)
 
-        min_ratio, max_ratio = basesize_ratio_range
-        min_ratio = int(min_ratio * 100)
-        max_ratio = int(max_ratio * 100)
-        # To be clarify, the original implementation is also intricate
-        step = int(np.floor(max_ratio - min_ratio) / (len(in_channels) - 2))
-        min_sizes = []
-        max_sizes = []
-        for r in range(int(min_ratio), int(max_ratio) + 1, step):
-            min_sizes.append(int(input_size * r / 100))
-            max_sizes.append(int(input_size * (r + step) / 100))
-        if input_size == 300:
-            assert basesize_ratio_range[0] in [0.15, 0.2]
-            if basesize_ratio_range[0] == 0.15:  # SSD300 COCO
-                min_sizes.insert(0, int(input_size * 7 / 100))
-                max_sizes.insert(0, int(input_size * 15 / 100))
-            elif basesize_ratio_range[0] == 0.2:  # SSD300 VOC
-                min_sizes.insert(0, int(input_size * 10 / 100))
-                max_sizes.insert(0, int(input_size * 20 / 100))
-        elif input_size == 512:
-            assert basesize_ratio_range[0] in [0.1, 0.15]
-            if basesize_ratio_range[0] == 0.1:  # SSD512 COCO
-                min_sizes.insert(0, int(input_size * 4 / 100))
-                max_sizes.insert(0, int(input_size * 10 / 100))
-            elif basesize_ratio_range[0] == 0.15:  # SSD512 VOC
-                min_sizes.insert(0, int(input_size * 7 / 100))
-                max_sizes.insert(0, int(input_size * 15 / 100))
+        # min_ratio, max_ratio = basesize_ratio_range
+        # min_ratio = int(min_ratio * 100)
+        # max_ratio = int(max_ratio * 100)
+        # # To be clarify, the original implementation is also intricate
+        # step = int(np.floor(max_ratio - min_ratio) / (len(in_channels) - 2))
+        # min_sizes = []
+        # max_sizes = []
+        # for r in range(int(min_ratio), int(max_ratio) + 1, step):
+        #     min_sizes.append(int(input_size * r / 100))
+        #     max_sizes.append(int(input_size * (r + step) / 100))
+        # if input_size == 300:
+        #     assert basesize_ratio_range[0] in [0.15, 0.2]
+        #     if basesize_ratio_range[0] == 0.15:  # SSD300 COCO
+        #         min_sizes.insert(0, int(input_size * 7 / 100))
+        #         max_sizes.insert(0, int(input_size * 15 / 100))
+        #     elif basesize_ratio_range[0] == 0.2:  # SSD300 VOC
+        #         min_sizes.insert(0, int(input_size * 10 / 100))
+        #         max_sizes.insert(0, int(input_size * 20 / 100))
+        # elif input_size == 512:
+        #     assert basesize_ratio_range[0] in [0.1, 0.15]
+        #     if basesize_ratio_range[0] == 0.1:  # SSD512 COCO
+        #         min_sizes.insert(0, int(input_size * 4 / 100))
+        #         max_sizes.insert(0, int(input_size * 10 / 100))
+        #     elif basesize_ratio_range[0] == 0.15:  # SSD512 VOC
+        #         min_sizes.insert(0, int(input_size * 7 / 100))
+        #         max_sizes.insert(0, int(input_size * 15 / 100))
+        # Trust me, anchor size matters, ssd's guiding formula is not always gold
+        self.min_sizes = min_sizes
+        self.max_sizes = max_sizes
         # real sizes of anchors
         self.anchor_generators = []
         self.anchor_strides = anchor_strides

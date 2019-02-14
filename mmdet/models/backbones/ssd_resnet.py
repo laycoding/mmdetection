@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # adjust by @laycoding
+# to respect weiliu, the extra conv layers implemented same as origin ssd-resnet
 import logging
 
 import torch
@@ -13,6 +14,31 @@ from mmdet.ops import DeformConv, ModulatedDeformConv
 from ..registry import BACKBONES
 from ..utils import build_norm_layer
 from .resnet import ResNet, Bottleneck, BasicBlock, make_res_layer
+
+def add_extras(in_channel, batch_norm=False):
+    # Extra layers added to resnet for feature scaling
+    layers = []
+    layers += [nn.Conv2d(in_channel, 256, kernel_size=1, stride=1)]
+    layers += [nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1)]
+    return layers
+
+def add_extras_ssd(size, in_channel, batch_norm=False):
+    # Extra layers added to resnet for feature scaling
+    layers = []
+    layers += [nn.Conv2d(in_channel, 256, kernel_size=1, stride=1)]
+    layers += [nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1)]
+    layers += [nn.Conv2d(256, 128, kernel_size=1, stride=1)]
+    layers += [nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1)]
+    if size == '300':
+        layers += [nn.Conv2d(256, 128, kernel_size=1, stride=1)]
+        layers += [nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=0)]
+    else:
+        layers += [nn.Conv2d(256, 128, kernel_size=1, stride=1)]
+        layers += [nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1)]
+        layers += [nn.Conv2d(256, 128, kernel_size=1, stride=1)]
+        layers += [nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1)]
+
+    return layers
 
 @BACKBONES.register_module
 class SSDResNet(ResNet):
@@ -45,19 +71,23 @@ class SSDResNet(ResNet):
     plane expansion rule, that's also the main reason why this file exists.
     the format of setting dict: (block_type, num_block, out_planes/expansion, stride)
     '''
-    extra_setting = {
-        300: (Bottleneck, 1, 128, 2),
-        512: (Bottleneck, 2, 128, 2),
-    }
-    def __init__(self, input_size, l2_norm_scale=20., **kwargs):
+
+    def __init__(self, input_size, l2_norm_scale=None, extra_stage=1, **kwargs):
         super(SSDResNet, self).__init__(**kwargs)
         assert input_size in (300, 512)
         self.input_size = input_size
-        #NB: just norm fist out stage as the paper did(todo:use getattr())
+        #NB: just norm fist out stage as the paper did if needed(todo:use getattr())
         for name, module in self.named_children():
             if name.endswith("layer"+str(self.out_indices[0]+1)):
                 norm_channel_dim = module[-1].conv3.out_channels
-        self.extra = self._make_extra_convs(self.extra_setting[input_size])
+        self.inchannel = self.block.expansion * 512
+        # peipeipei
+        if extra_stage==1:
+            self.extra = nn.ModuleList(add_extras(self.inchannel))
+        else:
+            self.extra = nn.ModuleList(add_extras_ssd(input_size, self.inchannel))
+        self.smooth1 = nn.Conv2d(
+            self.inchannel, 512, kernel_size=3, stride=1, padding=1)
         if l2_norm_scale is None:
             self.l2_norm_scale = None
         else:
@@ -93,8 +123,6 @@ class SSDResNet(ResNet):
         for extra_conv in self.extra.modules():
             if isinstance(extra_conv, nn.Conv2d):
                 kaiming_init(extra_conv)
-            elif isinstance(extra_conv, (nn.BatchNorm2d, nn.GroupNorm)):
-                constant_init(extra_conv, 1)
 
         if self.l2_norm_scale is not None:
             constant_init(self.l2_norm, self.l2_norm.scale)
@@ -109,11 +137,15 @@ class SSDResNet(ResNet):
             res_layer = getattr(self, layer_name)
             x = res_layer(x)
             if i in self.out_indices:
-                outs.append(x)
+                if i == 3:
+                    c5=self.smooth1(x)
+                    outs.append(c5)
+                else:
+                    outs.append(x)
         #NB: only support one extra stage as the origin paper
         for i, layer in enumerate(self.extra):
-            x = layer(x)
-            if i+1==len(self.extra):
+            x = F.relu(layer(x), inplace=True)
+            if i % 2 == 1:
                 outs.append(x)
         #norm the first stage
         if self.l2_norm_scale is not None:
@@ -123,22 +155,7 @@ class SSDResNet(ResNet):
         else:
             return tuple(outs)
 
-    def _make_extra_convs(self, extra_setting):
-        block_type, num_blocks, out_planes, stride = extra_setting
-        dcn = self.dcn if self.stage_with_dcn[self.num_stages-1] else None
-        extra_layer = make_res_layer(block_type,
-                   self.inplanes,
-                   out_planes,
-                   num_blocks,
-                   stride=stride,
-                   dilation=1,
-                   style='pytorch',
-                   normalize=dict(type='BN'),
-                   dcn=dcn)
-        # meaningless ops, just for extensionable
-        self.inplanes = out_planes * self.block.expansion
 
-        return extra_layer
 
 class L2Norm(nn.Module):
 

@@ -21,10 +21,6 @@ class TCB(FPN):
             relu
             conv
     '''
-    # tcb_setting = {
-    #     300: (BasicBlock, 1, 128, 2),
-    #     512: (Bottleneck, 2, 128, 2),
-    # }
     def __init__(self,
                  in_channels,
                  out_channels,
