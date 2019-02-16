@@ -104,7 +104,7 @@ class SSDHead(AnchorHead):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                xavier_init(m, distribution='normal', bias=0)
+                xavier_init(m, distribution='uniform', bias=0)
                 #kaiming_init(m, nonlinearity="leaky_relu")
         #self.extra.apply(weights_init)
 

@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import xavier_init, kaiming_init
+from mmcv.cnn import xavier_init, kaiming_init, constant_init
 
 from ..utils import ConvModule, build_norm_layer
 from ..registry import NECKS
@@ -80,7 +80,7 @@ class TCB(FPN):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                xavier_init(m, distribution='normal')
+                xavier_init(m, distribution='uniform')
                 # kaiming_init(m, nonlinearity="leak_relu")
             elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
                 constant_init(m, 1)
@@ -127,6 +127,7 @@ class TCBBlock(nn.Module):
         self.conv1 = conv3x3(inplanes, planes, stride, dilation)
         self.add_module(self.norm1_name, norm1)
         self.conv2 = conv3x3(planes, planes)
+        self.add_module(self.norm2_name, norm2)
 
         self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
@@ -138,6 +139,10 @@ class TCBBlock(nn.Module):
     def norm1(self):
         return getattr(self, self.norm1_name)
 
+    @property
+    def norm2(self):
+        return getattr(self, self.norm2_name)
+
     def forward(self, x):
         identity = x
 
@@ -146,10 +151,12 @@ class TCBBlock(nn.Module):
         out = self.relu(out)
 
         out = self.conv2(out)
+        out = self.norm2(out)
 
         if self.downsample is not None:
             identity = self.downsample(x)
 
         out += identity
+        out = self.relu(out)
 
         return out

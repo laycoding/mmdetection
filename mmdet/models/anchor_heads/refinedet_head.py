@@ -128,7 +128,7 @@ class RefineDetHead(AnchorHead):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                xavier_init(m, distribution='normal', bias=0)
+                xavier_init(m, distribution='uniform', bias=0)
 
     def forward(self, feats, refined_feats):
         # arm module
