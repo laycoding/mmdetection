@@ -3,7 +3,7 @@
 #source activate mmdet
 
 config="configs/pascal_voc/refinedet512_r50_1x_voc.py"
-#./tools/dist_train.sh $config 4 --validate
-CUDA_VISIBLE_DEVICES=0 python ./tools/train.py $config
+./tools/dist_train.sh $config 4 --validate
+#CUDA_VISIBLE_DEVICES=0 python ./tools/train.py $config
 
 # python ./tools/test.py $config work_dirs/refinedet512_r50_voc/epoch_1.pth

@@ -123,7 +123,7 @@ class SSDResNet(ResNet):
         # init the extra conv extra
         for extra_conv in self.extra.modules():
             if isinstance(extra_conv, nn.Conv2d):
-                xavier_init(extra_conv, distribution='uniform', bias=0)
+                xavier_init(extra_conv, distribution='normal', bias=0)
 
 
         if self.l2_norm_scale is not None:

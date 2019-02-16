@@ -80,8 +80,10 @@ class TCB(FPN):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                xavier_init(m, distribution='uniform')
+                xavier_init(m, distribution='normal')
                 # kaiming_init(m, nonlinearity="leak_relu")
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                constant_init(m, 1)
 
     def forward(self, inputs):
         assert len(inputs) == len(self.in_channels)
