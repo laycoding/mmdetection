@@ -14,6 +14,7 @@ from mmdet.ops import DeformConv, ModulatedDeformConv
 from ..registry import BACKBONES
 from ..utils import build_norm_layer
 from .resnet import ResNet, Bottleneck, BasicBlock, make_res_layer
+import torch.nn.init as init
 
 def add_extras(in_channel, batch_norm=False):
     # Extra layers added to resnet for feature scaling
@@ -122,7 +123,8 @@ class SSDResNet(ResNet):
         # init the extra conv extra
         for extra_conv in self.extra.modules():
             if isinstance(extra_conv, nn.Conv2d):
-                kaiming_init(extra_conv)
+                xavier_init(extra_conv, distribution='uniform', bias=0)
+
 
         if self.l2_norm_scale is not None:
             constant_init(self.l2_norm, self.l2_norm.scale)

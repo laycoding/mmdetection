@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import xavier_init
+from mmcv.cnn import xavier_init, kaiming_init
 
 from ..utils import ConvModule, build_norm_layer
 from ..registry import NECKS
@@ -81,6 +81,7 @@ class TCB(FPN):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 xavier_init(m, distribution='uniform')
+                # kaiming_init(m, nonlinearity="leak_relu")
 
     def forward(self, inputs):
         assert len(inputs) == len(self.in_channels)

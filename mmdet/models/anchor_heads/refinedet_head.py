@@ -11,6 +11,10 @@ from mmdet.core import (AnchorGenerator, anchor_target, refined_anchor_target, w
 from .anchor_head import AnchorHead
 from ..registry import HEADS
 
+def one_hot(labels, num_classes):
+    # torch vision 1.0 stable
+    ones = torch.eye(num_classes).cuda()
+    return ones.index_select(0, labels)
 
 @HEADS.register_module
 class RefineDetHead(AnchorHead):
@@ -146,9 +150,12 @@ class RefineDetHead(AnchorHead):
         return arm_cls_scores, arm_bbox_preds, odm_cls_scores, odm_bbox_preds
 
     def multiboxloss_single(self, cls_score, bbox_pred, labels, label_weights,
-                    bbox_targets, bbox_weights, num_total_samples, cfg):
+                    bbox_targets, bbox_weights, num_total_samples, cfg, num_classes=None):       
         loss_cls_all = F.cross_entropy(
             cls_score, labels, reduction='none') * label_weights
+        # log_softmax = torch.log((cls_score.softmax(1) + 1e-6).clamp(0, 1))
+        # one_hot_label = one_hot(labels, num_classes)
+        # loss_cls_all = -torch.sum(log_softmax * one_hot_label, dim=1)
         pos_inds = (labels > 0).nonzero().view(-1)
         neg_inds = (labels == 0).nonzero().view(-1)
 
@@ -173,6 +180,10 @@ class RefineDetHead(AnchorHead):
              cfg, use_arm=False, arm_cls_scores=None, arm_bbox_preds=None):
         if arm_bbox_preds is None or arm_cls_scores is None:
             assert use_arm==False
+        if not use_arm:     
+            num_classes = 2
+        else:
+            num_classes = self.num_classes
         featmap_sizes = [featmap.size()[-2:] for featmap in cls_scores]
         assert len(featmap_sizes) == len(self.anchor_generators)
 
@@ -259,7 +270,8 @@ class RefineDetHead(AnchorHead):
             all_bbox_targets,
             all_bbox_weights,
             num_total_samples=num_total_pos,
-            cfg=cfg)
+            cfg=cfg,
+            num_classes=num_classes)
         return dict(loss_cls=losses_cls, loss_reg=losses_reg)
 
     def loss(self, arm_cls_scores, arm_bbox_preds, odm_cls_scores, odm_bbox_preds,
