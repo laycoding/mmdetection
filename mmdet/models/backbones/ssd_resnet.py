@@ -123,7 +123,7 @@ class SSDResNet(ResNet):
         for extra_conv in self.extra.modules():
             if isinstance(extra_conv, nn.Conv2d):
                 # kaiming_init(extra_conv)
-                xavier_init(m, distribution='uniform', bias=0)
+                xavier_init(extra_conv, distribution='uniform', bias=0)
 
         if self.l2_norm_scale is not None:
             constant_init(self.l2_norm, self.l2_norm.scale)

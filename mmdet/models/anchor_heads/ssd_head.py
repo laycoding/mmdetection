@@ -130,9 +130,9 @@ class SSDHead(AnchorHead):
         loss_cls = (loss_cls_pos + loss_cls_neg) / num_total_samples
 
         loss_reg = weighted_smoothl1(
-            bbox_pred,
-            bbox_targets,
-            bbox_weights,
+            bbox_pred[pos_inds],
+            bbox_targets[pos_inds],
+            bbox_weights[pos_inds],
             beta=cfg.smoothl1_beta,
             avg_factor=num_total_samples)
         return loss_cls[None], loss_reg
