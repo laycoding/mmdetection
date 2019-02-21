@@ -4,15 +4,6 @@ model = dict(
     type='SingleStageDetector',
     pretrained='modelzoo://resnet50',
     backbone=dict(
-        type='SSDVGG',
-        input_size=input_size,
-        depth=16,
-        with_last_pool=False,
-        ceil_mode=True,
-        out_indices=(3, 4),
-        out_feature_indices=(22, 34),
-        l2_norm_scale=20),
-    backbone=dict(
         type='SSDResNet',
         input_size=input_size,
         depth=50,
@@ -65,7 +56,7 @@ data = dict(
     workers_per_gpu=2,
     train=dict(
         type='RepeatDataset',
-        times=10,
+        times=1,
         dataset=dict(
             type=dataset_type,
             ann_file=[
@@ -126,8 +117,8 @@ lr_config = dict(
     policy='step',
     warmup='linear',
     warmup_iters=500,
-    warmup_ratio=1.0 / 3,
-    step=[16, 20])
+    warmup_ratio=1.0 / 1000,
+    step=[160, 200])
 checkpoint_config = dict(interval=1)
 # yapf:disable
 log_config = dict(
@@ -138,7 +129,7 @@ log_config = dict(
     ])
 # yapf:enable
 # runtime settings
-total_epochs = 24
+total_epochs = 240
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
 work_dir = './work_dirs/ssd512_r50_voc'
