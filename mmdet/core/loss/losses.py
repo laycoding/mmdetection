@@ -92,8 +92,9 @@ def smooth_l1_loss(pred, target, beta=1.0, reduction='mean'):
 def weighted_smoothl1(pred, target, weight, beta=1.0, avg_factor=None):
     if avg_factor is None:
         avg_factor = torch.sum(weight > 0).float().item() / 4 + 1e-6
-    loss = smooth_l1_loss(pred, target, beta, reduction='none')
-    return torch.sum(loss * weight)[None] / avg_factor
+    pos_index = (bbox_weights.sum(1)>0).nonzero().view(-1)
+    loss = smooth_l1_loss(pred[pos_index], target[pos_index], beta, reduction='none')
+    return torch.sum(loss)[None] / avg_factor
 
 
 def accuracy(pred, target, topk=1):
