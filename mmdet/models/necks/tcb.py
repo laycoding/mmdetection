@@ -123,6 +123,7 @@ class TCBBlock(nn.Module):
         super(TCBBlock, self).__init__()
 
         self.norm1_name, norm1 = build_norm_layer(normalize, planes, postfix=1)
+        self.norm2_name, norm2 = build_norm_layer(normalize, planes, postfix=2)
 
         self.conv1 = conv3x3(inplanes, planes, stride, dilation)
         self.add_module(self.norm1_name, norm1)
