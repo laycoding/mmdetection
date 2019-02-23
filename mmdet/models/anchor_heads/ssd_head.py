@@ -19,6 +19,11 @@ def weights_init(m):
         elif key.split('.')[-1] == 'bias':
             m.state_dict()[key][...] = 0
 
+def one_hot(labels, num_classes):
+    # torch vision 1.0 stable
+    ones = torch.eye(num_classes).cuda()
+    return ones.index_select(0, labels)
+
 @HEADS.register_module
 class SSDHead(AnchorHead):
 
@@ -119,8 +124,11 @@ class SSDHead(AnchorHead):
 
     def loss_single(self, cls_score, bbox_pred, labels, label_weights,
                     bbox_targets, bbox_weights, num_total_samples, cfg):
-        loss_cls_all = F.cross_entropy(
-            cls_score, labels, reduction='none') * label_weights
+        # loss_cls_all = F.cross_entropy(
+        #     cls_score, labels, reduction='none') * label_weights
+        log_softmax = torch.log((cls_score.softmax(1) + 1e-6).clamp(0, 1))
+        one_hot_label = one_hot(labels, num_classes)
+        loss_cls_all = -torch.sum(log_softmax * one_hot_label, dim=1)
         pos_inds = (labels > 0).nonzero().view(-1)
         neg_inds = (labels == 0).nonzero().view(-1)
 
