@@ -1,8 +1,8 @@
 # model settings
 input_size = 512
 model = dict(
-    type='RefineDet',
-    pretrained='modelzoo://resnet50',
+    type='SingleStageDetector',
+    pretrained='open-mmlab://resnet50_caffe',
     backbone=dict(
         type='SSDResNet',
         input_size=input_size,
@@ -10,28 +10,23 @@ model = dict(
         strides=(1, 2, 2, 2),
         dilations=(1, 1, 1, 1),
         stage_with_dcn=(False, False, False, False),
-        num_stages=4, #nb: special extra convs for refinedet
+        num_stages=4,
         out_indices=(1, 2, 3),
         frozen_stages=1,
-        style='pytorch',
+        style='caffe',
         l2_norm_scale=None,
-        extra_stage=1),
-    neck=dict(
-        type='TCB',
-        in_channels=[512, 1024, 512, 256],
-        out_channels=256,
-        start_level=0),
+        extra_stage=4),
+    neck=None,
     bbox_head=dict(
-        type='RefineDetHead',
+        type='SSDHead',
         input_size=input_size,
-        in_channels=([512, 256], [1024, 256], [512, 256], [256, 256]),
-        num_classes=21,
-        anchor_strides=(8, 16, 32, 64),
-        anchor_ratios=([2], [2, 3], [2, 3], [2]),
+        in_channels=(512, 1024, 512, 256, 256, 256, 256),
+        num_classes=81,
+        anchor_strides=(8, 16, 32, 64, 128, 256, 512),
+        basesize_ratio_range=(0.1, 0.9),
+        anchor_ratios=([2], [2, 3], [2, 3], [2, 3], [2, 3], [2], [2]),
         target_means=(.0, .0, .0, .0),
-        target_stds=(0.1, 0.1, 0.2, 0.2),
-        min_sizes=[30, 64, 128, 256],
-        max_sizes=[64, 128, 256, 315]))
+        target_stds=(0.1, 0.1, 0.2, 0.2)))
 cudnn_benchmark = True
 train_cfg = dict(
     assigner=dict(
@@ -49,26 +44,23 @@ train_cfg = dict(
 test_cfg = dict(
     nms=dict(type='nms', iou_thr=0.45),
     min_bbox_size=0,
-    score_thr=0.01,
+    score_thr=0.02,
     max_per_img=200)
 # model training and testing settings
 # dataset settings
-dataset_type = 'VOCDataset'
-data_root = 'data/VOCdevkit/'
+dataset_type = 'CocoDataset'
+data_root = 'data/coco/'
 img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[1, 1, 1], to_rgb=True)
 data = dict(
-    imgs_per_gpu=4,
-    workers_per_gpu=2,
+    imgs_per_gpu=8,
+    workers_per_gpu=3,
     train=dict(
         type='RepeatDataset',
         times=1,
         dataset=dict(
             type=dataset_type,
-            ann_file=[
-                data_root + 'VOC2007/ImageSets/Main/trainval.txt',
-                data_root + 'VOC2012/ImageSets/Main/trainval.txt'
-            ],
-            img_prefix=[data_root + 'VOC2007/', data_root + 'VOC2012/'],
+            ann_file=data_root + 'annotations/instances_train2017.json',
+            img_prefix=data_root + 'train2017/',
             img_scale=(512, 512),
             img_norm_cfg=img_norm_cfg,
             size_divisor=None,
@@ -92,8 +84,8 @@ data = dict(
             resize_keep_ratio=False)),
     val=dict(
         type=dataset_type,
-        ann_file=data_root + 'VOC2007/ImageSets/Main/test.txt',
-        img_prefix=data_root + 'VOC2007/',
+        ann_file=data_root + 'annotations/instances_val2017.json',
+        img_prefix=data_root + 'val2017/',
         img_scale=(512, 512),
         img_norm_cfg=img_norm_cfg,
         size_divisor=None,
@@ -104,8 +96,8 @@ data = dict(
         resize_keep_ratio=False),
     test=dict(
         type=dataset_type,
-        ann_file=data_root + 'VOC2007/ImageSets/Main/test.txt',
-        img_prefix=data_root + 'VOC2007/',
+        ann_file=data_root + 'annotations/instances_val2017.json',
+        img_prefix=data_root + 'val2017/',
         img_scale=(512, 512),
         img_norm_cfg=img_norm_cfg,
         size_divisor=None,
@@ -115,15 +107,15 @@ data = dict(
         test_mode=True,
         resize_keep_ratio=False))
 # optimizer
-optimizer = dict(type='SGD', lr=1e-3, momentum=0.9, weight_decay=5e-4)
+optimizer = dict(type='SGD', lr=2e-3, momentum=0.9, weight_decay=5e-4)
 optimizer_config = dict()
 # learning policy
 lr_config = dict(
     policy='step',
     warmup='linear',
     warmup_iters=500,
-    warmup_ratio=1.0 / 3,
-    step=[160, 200])
+    warmup_ratio=1.0 / 1000,
+    step=[80, 110])
 checkpoint_config = dict(interval=1)
 # yapf:disable
 log_config = dict(
@@ -134,10 +126,10 @@ log_config = dict(
     ])
 # yapf:enable
 # runtime settings
-total_epochs = 240
+total_epochs = 120
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/renfinedet512_r50_voc'
+work_dir = './work_dirs/ssd512_r50_coco'
 load_from = None
 resume_from = None
-workflow = [('train', 1)]
+workflow = [('train', 5)]

@@ -29,14 +29,18 @@ class RefineDetHead(AnchorHead):
                  target_stds=(1.0, 1.0, 1.0, 1.0),
                  objectness_score=0.01,
                  min_sizes=[30, 64, 128, 256],
-                 max_sizes=[64, 128, 256, 315]):
+                 max_sizes=[64, 128, 256, 315],
+                 use_max_size=False):
         super(AnchorHead, self).__init__()
         self.objectness_score = objectness_score
         self.input_size = input_size
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.cls_out_channels = num_classes
-        num_anchors = [len(ratios) * 2 + 2 for ratios in anchor_ratios]
+        if use_sigmoid_cls:
+            num_anchors = [len(ratios) * 2 + 2 for ratios in anchor_ratios]
+        else:
+            num_anchors = [len(ratios) * 2 + 1 for ratios in anchor_ratios]
         arm_reg_convs = []
         arm_cls_convs = []
         odm_reg_convs = []
@@ -71,32 +75,6 @@ class RefineDetHead(AnchorHead):
         self.odm_reg_convs = nn.ModuleList(odm_reg_convs)
         self.odm_cls_convs = nn.ModuleList(odm_cls_convs)
 
-        # min_ratio, max_ratio = basesize_ratio_range
-        # min_ratio = int(min_ratio * 100)
-        # max_ratio = int(max_ratio * 100)
-        # # To be clarify, the original implementation is also intricate
-        # step = int(np.floor(max_ratio - min_ratio) / (len(in_channels) - 2))
-        # min_sizes = []
-        # max_sizes = []
-        # for r in range(int(min_ratio), int(max_ratio) + 1, step):
-        #     min_sizes.append(int(input_size * r / 100))
-        #     max_sizes.append(int(input_size * (r + step) / 100))
-        # if input_size == 300:
-        #     assert basesize_ratio_range[0] in [0.15, 0.2]
-        #     if basesize_ratio_range[0] == 0.15:  # SSD300 COCO
-        #         min_sizes.insert(0, int(input_size * 7 / 100))
-        #         max_sizes.insert(0, int(input_size * 15 / 100))
-        #     elif basesize_ratio_range[0] == 0.2:  # SSD300 VOC
-        #         min_sizes.insert(0, int(input_size * 10 / 100))
-        #         max_sizes.insert(0, int(input_size * 20 / 100))
-        # elif input_size == 512:
-        #     assert basesize_ratio_range[0] in [0.1, 0.15]
-        #     if basesize_ratio_range[0] == 0.1:  # SSD512 COCO
-        #         min_sizes.insert(0, int(input_size * 4 / 100))
-        #         max_sizes.insert(0, int(input_size * 10 / 100))
-        #     elif basesize_ratio_range[0] == 0.15:  # SSD512 VOC
-        #         min_sizes.insert(0, int(input_size * 7 / 100))
-        #         max_sizes.insert(0, int(input_size * 15 / 100))
         # Trust me, anchor size matters, ssd's guiding formula is not always gold
         self.min_sizes = min_sizes
         self.max_sizes = max_sizes
@@ -107,7 +85,10 @@ class RefineDetHead(AnchorHead):
             base_size = min_sizes[k]
             stride = anchor_strides[k]
             ctr = ((stride - 1) / 2., (stride - 1) / 2.)
-            scales = [1., np.sqrt(max_sizes[k] / min_sizes[k])]
+            if use_max_size:
+                scales = [1., np.sqrt(max_sizes[k] / min_sizes[k])]
+            else:
+                scales = [1.]
             ratios = [1.]
             for r in anchor_ratios[k]:
                 ratios += [1 / r, r]  # 4 or 6 ratio

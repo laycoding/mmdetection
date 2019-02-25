@@ -27,11 +27,12 @@ model = dict(
         in_channels=([512, 256], [1024, 256], [512, 256], [256, 256]),
         num_classes=21,
         anchor_strides=(8, 16, 32, 64),
-        anchor_ratios=([2], [2, 3], [2, 3], [2]),
+        anchor_ratios=([2], [2], [2], [2]),
         target_means=(.0, .0, .0, .0),
         target_stds=(0.1, 0.1, 0.2, 0.2),
         min_sizes=[30, 64, 128, 256],
-        max_sizes=[64, 128, 256, 315]))
+        max_sizes=[64, 128, 256, 315],
+        use_max_size=False))
 cudnn_benchmark = True
 train_cfg = dict(
     assigner=dict(
@@ -49,7 +50,7 @@ train_cfg = dict(
 test_cfg = dict(
     nms=dict(type='nms', iou_thr=0.45),
     min_bbox_size=0,
-    score_thr=0.01,
+    score_thr=0.02,
     max_per_img=200)
 # model training and testing settings
 # dataset settings
@@ -122,7 +123,7 @@ lr_config = dict(
     policy='step',
     warmup='linear',
     warmup_iters=500,
-    warmup_ratio=1.0 / 3,
+    warmup_ratio=1.0 / 1000,
     step=[160, 200])
 checkpoint_config = dict(interval=1)
 # yapf:disable
@@ -140,4 +141,4 @@ log_level = 'INFO'
 work_dir = './work_dirs/renfinedet512_r50_voc'
 load_from = None
 resume_from = None
-workflow = [('train', 1)]
+workflow = [('train', 5)]
