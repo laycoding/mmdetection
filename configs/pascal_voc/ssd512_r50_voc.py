@@ -2,7 +2,7 @@
 input_size = 512
 model = dict(
     type='SingleStageDetector',
-    pretrained='modelzoo://resnet50',
+    pretrained='open-mmlab://resnet50_caffe',
     backbone=dict(
         type='SSDResNet',
         input_size=input_size,
@@ -13,7 +13,7 @@ model = dict(
         num_stages=4, #nb: special extra convs for ssd
         out_indices=(1, 2, 3),
         frozen_stages=1,
-        style='pytorch',
+        style='caffe',
         l2_norm_scale=None,
         extra_stage=4),
     neck=None,
@@ -117,7 +117,7 @@ lr_config = dict(
     policy='step',
     warmup='linear',
     warmup_iters=500,
-    warmup_ratio=1.0 / 3,
+    warmup_ratio=1.0 / 1000,
     step=[16, 20])
 checkpoint_config = dict(interval=1)
 # yapf:disable

@@ -24,7 +24,7 @@ class RefineDetHead(AnchorHead):
                  num_classes=81,
                  in_channels=([512, 256], [1024, 256], [512, 256], [256, 256]),
                  anchor_strides=(8, 16, 32, 64),
-                 anchor_ratios=([2], [2, 3], [2, 3], [2]),
+                 anchor_ratios=([2], [2], [2], [2]),
                  target_means=(.0, .0, .0, .0),
                  target_stds=(1.0, 1.0, 1.0, 1.0),
                  objectness_score=0.01,
@@ -37,7 +37,7 @@ class RefineDetHead(AnchorHead):
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.cls_out_channels = num_classes
-        if use_sigmoid_cls:
+        if use_max_size:
             num_anchors = [len(ratios) * 2 + 2 for ratios in anchor_ratios]
         else:
             num_anchors = [len(ratios) * 2 + 1 for ratios in anchor_ratios]
@@ -85,18 +85,18 @@ class RefineDetHead(AnchorHead):
             base_size = min_sizes[k]
             stride = anchor_strides[k]
             ctr = ((stride - 1) / 2., (stride - 1) / 2.)
-            if use_max_size:
-                scales = [1., np.sqrt(max_sizes[k] / min_sizes[k])]
-            else:
-                scales = [1.]
             ratios = [1.]
             for r in anchor_ratios[k]:
                 ratios += [1 / r, r]  # 4 or 6 ratio
+            indices = list(range(len(ratios)))
+            if use_max_size:
+                scales = [1., np.sqrt(max_sizes[k] / min_sizes[k])]
+                indices.insert(1, len(indices))
+            else:
+                scales = [1.]
             # 1 1/r r '√scale' as the @weiliu implemented
             anchor_generator = AnchorGenerator(
                 base_size, scales, ratios, scale_major=False, ctr=ctr)
-            indices = list(range(len(ratios)))
-            indices.insert(1, len(indices))
             anchor_generator.base_anchors = torch.index_select(
                 anchor_generator.base_anchors, 0, torch.LongTensor(indices))
             self.anchor_generators.append(anchor_generator)

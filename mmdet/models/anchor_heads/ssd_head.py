@@ -9,16 +9,6 @@ from mmdet.core import (AnchorGenerator, anchor_target, weighted_smoothl1,
 from .anchor_head import AnchorHead
 from ..registry import HEADS
 
-def weights_init(m):
-    for key in m.state_dict():
-        if key.split('.')[-1] == 'weight':
-            if 'conv' in key:
-                init.kaiming_normal(m.state_dict()[key], mode='fan_out')
-            if 'bn' in key:
-                m.state_dict()[key][...] = 1
-        elif key.split('.')[-1] == 'bias':
-            m.state_dict()[key][...] = 0
-
 def one_hot(labels, num_classes):
     # torch vision 1.0 stable
     ones = torch.eye(num_classes).cuda()
@@ -110,8 +100,7 @@ class SSDHead(AnchorHead):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 xavier_init(m, distribution='uniform', bias=0)
-                #kaiming_init(m, nonlinearity="leaky_relu")
-        #self.extra.apply(weights_init)
+                #kaiming_init(m)
 
     def forward(self, feats):
         cls_scores = []

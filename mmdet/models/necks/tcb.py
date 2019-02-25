@@ -130,7 +130,8 @@ class TCBBlock(nn.Module):
         self.conv2 = conv3x3(planes, planes)
         self.add_module(self.norm2_name, norm2)
 
-        self.relu = nn.ReLU(inplace=True)
+        #NB: 2333333 no idea
+        self.relu = nn.ReLU(inplace=False)
         self.downsample = downsample
         self.stride = stride
         self.dilation = dilation

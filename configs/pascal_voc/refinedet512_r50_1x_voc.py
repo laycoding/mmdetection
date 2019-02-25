@@ -2,7 +2,7 @@
 input_size = 512
 model = dict(
     type='RefineDet',
-    pretrained='modelzoo://resnet50',
+    pretrained='open-mmlab://resnet50_caffe',
     backbone=dict(
         type='SSDResNet',
         input_size=input_size,
@@ -13,7 +13,7 @@ model = dict(
         num_stages=4, #nb: special extra convs for refinedet
         out_indices=(1, 2, 3),
         frozen_stages=1,
-        style='pytorch',
+        style='caffe',
         l2_norm_scale=None,
         extra_stage=1),
     neck=dict(
@@ -27,11 +27,12 @@ model = dict(
         in_channels=([512, 256], [1024, 256], [512, 256], [256, 256]),
         num_classes=21,
         anchor_strides=(8, 16, 32, 64),
-        anchor_ratios=([2], [2, 3], [2, 3], [2]),
+        anchor_ratios=([2], [2], [2], [2]),
         target_means=(.0, .0, .0, .0),
         target_stds=(0.1, 0.1, 0.2, 0.2),
         min_sizes=[30, 64, 128, 256],
-        max_sizes=[64, 128, 256, 315]))
+        max_sizes=[64, 128, 256, 315],
+        use_max_size=False))
 cudnn_benchmark = True
 train_cfg = dict(
     assigner=dict(
@@ -57,7 +58,7 @@ dataset_type = 'VOCDataset'
 data_root = 'data/VOCdevkit/'
 img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[1, 1, 1], to_rgb=True)
 data = dict(
-    imgs_per_gpu=4,
+    imgs_per_gpu=8,
     workers_per_gpu=2,
     train=dict(
         type='RepeatDataset',
@@ -121,11 +122,11 @@ optimizer_config = dict()
 lr_config = dict(
     policy='step',
     warmup='linear',
-    warmup_iters=500,
-    warmup_ratio=1.0 / 3,
+    warmup_iters=1000,
+    warmup_ratio=1.0 / 1000,
     step=[160, 200])
-checkpoint_config = dict(interval=1)
-# yapf:disable
+checkpoint_config = dict(interval=10)
+# yapf:disables
 log_config = dict(
     interval=50,
     hooks=[
