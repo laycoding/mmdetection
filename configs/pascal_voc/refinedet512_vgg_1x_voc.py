@@ -2,7 +2,7 @@
 input_size = 512
 model = dict(
     type='RefineDet',
-    pretrained='modelzoo://resnet50',
+    pretrained='open-mmlab://resnet50_caffe',
     backbone=dict(
         type='SSDResNet',
         input_size=input_size,
@@ -13,7 +13,7 @@ model = dict(
         num_stages=4, #nb: special extra convs for refinedet
         out_indices=(1, 2, 3),
         frozen_stages=1,
-        style='pytorch',
+        style='caffe',
         l2_norm_scale=None,
         extra_stage=1),
     neck=dict(
