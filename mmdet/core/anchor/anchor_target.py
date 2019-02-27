@@ -240,7 +240,6 @@ def refined_anchor_target(anchor_list,
         ]
     # where the refine refine
     anchor_list = refine_anchor(anchor_list, arm_bbox_preds, img_metas, target_means, target_stds)
-    # valid_flag_list = filter_anchor(valid_flag_list, arm_cls_scores)
     # compute targets for each image
     if gt_labels_list is None:
         gt_labels_list = [None for _ in range(num_imgs)]
@@ -258,6 +257,7 @@ def refined_anchor_target(anchor_list,
          label_channels=label_channels,
          sampling=sampling,
          unmap_outputs=unmap_outputs)
+    pos_inds_list = filter_anchor(pos_inds_list, arm_cls_scores)
     # no valid anchors
     if any([labels is None for labels in all_labels]):
         return None
@@ -283,12 +283,16 @@ def refine_anchor(anchor_list, arm_bbox_preds, img_metas, target_means, target_s
           img_metas[i]['img_shape']))
     return new_anchor_list
 
-def filter_anchor(valid_flag_list, arm_cls_scores, objectness_score=0.01):
+def filter_anchor(pos_inds_list, arm_cls_scores, objectness_score=0.01):
     new_valid_flag_list = []
-    for i in range(len(valid_flag_list)):
+    for i in range(len(pos_inds_list)):
         scores = arm_cls_scores[i].softmax(-1)
         max_scores, _ = scores[:, 1:].max(dim=1)
-        valid_flag_list[i][max_scores<=objectness_score]=0
-        new_valid_flag_list.append(valid_flag_list[i])
+        pos_inds = torch.zeros_like(arm_cls_scores[0,:,0])
+        mask = torch.zeros_like(arm_cls_scores[0,:,0])
+        pos_inds[pos_inds_list[i]]=1
+        pos_inds=torch.where(max_scores<=objectness_score, mask, pos_inds)
+        pos_inds=torch.nonzero(pos_inds>0).squeeze()
+        new_valid_flag_list.append(pos_inds)
     return new_valid_flag_list
 

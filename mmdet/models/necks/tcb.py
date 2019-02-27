@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from mmcv.cnn import xavier_init, kaiming_init, constant_init
 
-from ..utils import ConvModule, build_norm_layer
+# from ..utils import ConvModule, build_norm_layer
 from ..registry import NECKS
 from ..backbones import BasicBlock
 from ..backbones.resnet import make_res_layer, conv3x3
@@ -38,11 +38,6 @@ class TCB(FPN):
         if end_level == -1:
             self.end_level = self.num_ins
             assert num_outs >= self.num_ins - start_level
-        else:
-            # if end_level < inputs, no extra level is allowed
-            self.end_level = end_level
-            assert end_level <= len(in_channels)
-            assert num_outs == end_level - start_level + 1
         self.start_level = start_level
 
         self.lateral_convs = nn.ModuleList()
@@ -50,24 +45,18 @@ class TCB(FPN):
 
         for i in range(self.start_level, self.end_level):
             # TCB block
-            l_conv = make_res_layer(TCBBlock,
-               in_channels[i],
-               out_channels,
-               1,
-               stride=1,
-               dilation=1,
-               style='pytorch',
-               normalize=dict(type='BN'))
+            l_conv = TCBBlock(
+                 in_channels[i],
+                 out_channels,
+                 stride=1,
+                 dilation=1)
             #NB: diff from the origin paper,we use simple 3x3 conv instead of residual block
-            fpn_conv = ConvModule(
+            fpn_conv = nn.Conv2d(
                 out_channels,
                 out_channels,
-                3,
-                padding=1,
-                normalize=self.normalize,
-                bias=self.with_bias,
-                activation=self.activation,
-                inplace=False)
+                kernel_size=3,
+                stride=1,
+                padding=1)
 
             self.lateral_convs.append(l_conv)
             self.fpn_convs.append(fpn_conv)
@@ -76,14 +65,11 @@ class TCB(FPN):
             # setattr(self, 'lateral_conv{}'.format(lvl_id), l_conv)
             # setattr(self, 'fpn_conv{}'.format(lvl_id), fpn_conv)
 
-    # default init_weights for conv(msra) and norm in ConvModule
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                xavier_init(m, distribution='uniform')
-                # kaiming_init(m, nonlinearity="leak_relu")
-            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
-                constant_init(m, 1)
+                # xavier_init(m, distribution='uniform')
+                kaiming_init(m)
 
     def forward(self, inputs):
         assert len(inputs) == len(self.in_channels)
@@ -98,67 +84,35 @@ class TCB(FPN):
         used_backbone_levels = len(laterals)
         for i in range(used_backbone_levels - 1, 0, -1):
             laterals[i - 1] += F.interpolate(
-                laterals[i], scale_factor=2, mode='nearest')
-
+                laterals[i], scale_factor=2, mode='bilinear', align_corners=False)
+        for lateral in laterals:
+            lateral = F.relu(lateral, inplace=True)
         # build outputs
         outs = [
-            self.fpn_convs[i](laterals[i]) for i in range(used_backbone_levels)
+            F.relu(self.fpn_convs[i](laterals[i]), inplace=True)
+            for i in range(used_backbone_levels)
         ]
 
         return tuple(outs)
 
 class TCBBlock(nn.Module):
-    expansion = 1
-
     def __init__(self,
                  inplanes,
                  planes,
                  stride=1,
-                 dilation=1,
-                 downsample=None,
-                 style='pytorch',
-                 with_cp=False,
-                 normalize=dict(type='BN'),
-                 dcn=None):
+                 dilation=1):
         super(TCBBlock, self).__init__()
 
-        self.norm1_name, norm1 = build_norm_layer(normalize, planes, postfix=1)
-        self.norm2_name, norm2 = build_norm_layer(normalize, planes, postfix=2)
-
-        self.conv1 = conv3x3(inplanes, planes, stride, dilation)
-        self.add_module(self.norm1_name, norm1)
-        self.conv2 = conv3x3(planes, planes)
-        self.add_module(self.norm2_name, norm2)
-
-        #NB: 2333333 no idea
-        self.relu = nn.ReLU(inplace=False)
-        self.downsample = downsample
-        self.stride = stride
-        self.dilation = dilation
-        assert not with_cp
-
-    @property
-    def norm1(self):
-        return getattr(self, self.norm1_name)
-
-    @property
-    def norm2(self):
-        return getattr(self, self.norm2_name)
+        self.conv1 = nn.Conv2d(inplanes, planes, \
+            kernel_size=3, stride=stride, padding=dilation)
+        self.conv2 = nn.Conv2d(planes, planes, \
+            kernel_size=3, stride=stride, padding=dilation)
+        self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        identity = x
-
         out = self.conv1(x)
-        out = self.norm1(out)
         out = self.relu(out)
 
         out = self.conv2(out)
-        out = self.norm2(out)
-
-        if self.downsample is not None:
-            identity = self.downsample(x)
-
-        out += identity
-        out = self.relu(out)
 
         return out

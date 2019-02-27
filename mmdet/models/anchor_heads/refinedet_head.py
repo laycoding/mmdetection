@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import xavier_init
+from mmcv.cnn import xavier_init, kaiming_init
 
 from mmdet.core import (AnchorGenerator, anchor_target, refined_anchor_target, weighted_smoothl1,
                         multi_apply, delta2bbox, multiclass_nms)
