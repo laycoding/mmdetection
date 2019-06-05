@@ -51,7 +51,7 @@ class FSAFHead(nn.Module):
         self.cls_convs = nn.ModuleList()
         self.reg_convs = nn.ModuleList()
         for i in range(self.stacked_convs):
-            chn = self.in_channels if i == 0 else self.feat_channels
+            chn = self.in_channels[i] if i == 0 else self.feat_channels
             self.cls_convs.append(
                 ConvModule(
                     chn,
