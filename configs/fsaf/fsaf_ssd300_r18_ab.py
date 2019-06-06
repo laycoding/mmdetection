@@ -22,8 +22,7 @@ model = dict(
         norm_factor=4.0,
         feat_strides=[8, 16, 32, 64, 128],
         input_size=input_size,
-        in_channels=(128, 128, 128, 128, 128),
-        num_classes=21,
+        ab_in_channels=(128, 128, 128, 128, 128),
         anchor_strides=(8, 16, 32, 64, 100),
         basesize_ratio_range=(0.2, 0.9),
         anchor_ratios=([2], [2, 3], [2, 3], [2, 3], [2]),
@@ -41,13 +40,22 @@ train_cfg = dict(
     online_select=True,
     allowed_border=-1,
     pos_weight=-1,
-    debug=False)
+    debug=False,
+    assigner=dict(
+        type='MaxIoUAssigner',
+        pos_iou_thr=0.5,
+        neg_iou_thr=0.5,
+        min_pos_iou=0.,
+        ignore_iof_thr=-1,
+        gt_max_assign_all=False),
+    smoothl1_beta=1.,
+    neg_pos_ratio=3)
 test_cfg = dict(
     nms_pre=1000,
     min_bbox_size=0,
     score_thr=0.05,
-    nms=dict(type='nms', iou_thr=0.5),
-    max_per_img=100)
+    nms=dict(type='nms', iou_thr=0.45),
+    max_per_img=200)
 # dataset settings
 dataset_type = 'VOCDataset'
 data_root = 'data/VOCdevkit/'

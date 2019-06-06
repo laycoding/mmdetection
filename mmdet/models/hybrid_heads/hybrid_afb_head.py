@@ -1,10 +1,12 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from mmcv.cnn import normal_init
+import torch.nn.functional as F
+from mmcv.cnn import normal_init, xavier_init
 from mmdet.core import (multi_apply, multiclass_nms, distance2bbox,
                         weighted_sigmoid_focal_loss, select_iou_loss)
-
+from mmdet.core import (AnchorGenerator, anchor_target, delta2bbox, weighted_smoothl1, 
+                        multi_apply)
 from ..registry import HEADS
 from ..utils import bias_init_with_prob, ConvModule
 
@@ -44,11 +46,10 @@ class HybridAFBHead(nn.Module):
                  conv_cfg=None,
                  norm_cfg=None,
                  input_size=300,
-                 num_classes=21,
-                 in_channels=(512, 1024, 512, 256, 256, 256),
-                 anchor_strides=(8, 16, 32, 64, 100, 300),
+                 ab_in_channels=(512, 1024, 512, 256, 256),
+                 anchor_strides=(8, 16, 32, 64, 100),
                  basesize_ratio_range=(0.1, 0.9),
-                 anchor_ratios=([2], [2, 3], [2, 3], [2, 3], [2], [2]),
+                 anchor_ratios=([2], [2, 3], [2, 3], [2, 3], [2]),
                  target_means=(.0, .0, .0, .0),
                  target_stds=(1.0, 1.0, 1.0, 1.0)):
         super(HybridAFBHead, self).__init__()
@@ -64,21 +65,21 @@ class HybridAFBHead(nn.Module):
         # anchor based part
         self.input_size = input_size
         self.num_classes = num_classes
-        self.in_channels = in_channels
+        self.ab_in_channels = ab_in_channels
         self.cls_out_channels_ab = num_classes
         num_anchors = [len(ratios) * 2 + 2 for ratios in anchor_ratios]
         ab_reg_convs = []
         ab_cls_convs = []
-        for i in range(len(in_channels)):
+        for i in range(len(ab_in_channels)):
             ab_reg_convs.append(
                 nn.Conv2d(
-                    in_channels[i],
+                    ab_in_channels[i],
                     num_anchors[i] * 4,
                     kernel_size=3,
                     padding=1))
             ab_cls_convs.append(
                 nn.Conv2d(
-                    in_channels[i],
+                    ab_in_channels[i],
                     num_anchors[i] * num_classes,
                     kernel_size=3,
                     padding=1))
@@ -88,7 +89,7 @@ class HybridAFBHead(nn.Module):
         min_ratio, max_ratio = basesize_ratio_range
         min_ratio = int(min_ratio * 100)
         max_ratio = int(max_ratio * 100)
-        step = int(np.floor(max_ratio - min_ratio) / (len(in_channels) - 2))
+        step = int(np.floor(max_ratio - min_ratio) / (len(ab_in_channels) - 2))
         min_sizes = []
         max_sizes = []
         for r in range(int(min_ratio), int(max_ratio) + 1, step):
@@ -185,6 +186,7 @@ class HybridAFBHead(nn.Module):
         stacked_reg_feats = feats
         cls_feats = []
         reg_feats = []
+        # head of the head 233
         for cls_feat in stacked_cls_feats:
             for cls_conv in self.cls_convs:
                 cls_feat = cls_conv(cls_feat)
@@ -311,7 +313,7 @@ class HybridAFBHead(nn.Module):
             label_channels=1,
             sampling=False,
             unmap_outputs=False)
-        if cls_reg_targets is None:
+        if ab_cls_reg_targets is None:
             return None
         (ab_labels_list, ab_label_weights_list, ab_bbox_targets_list, ab_bbox_weights_list,
          ab_num_total_pos, ab_num_total_neg) = ab_cls_reg_targets
@@ -343,7 +345,7 @@ class HybridAFBHead(nn.Module):
             ab_all_bbox_weights,
             num_total_samples=ab_num_total_pos,
             cfg=cfg)
-        return dict(ab_loss_cls=ab_losses_cls, ab_loss_reg=ab_losses_reg, af_loss_cls=af_losses_cls, af_loss_reg=af_losses_reg)
+        return dict(ab_loss_cls=ab_losses_cls, ab_loss_bbox=ab_losses_bbox, af_loss_cls=af_losses_cls, af_loss_reg=af_losses_reg)
 
     def point_target(self,
                      cls_scores,
@@ -746,3 +748,42 @@ class HybridAFBHead(nn.Module):
                                                 cfg.score_thr, cfg.nms,
                                                 cfg.max_per_img)
         return det_bboxes, det_labels
+
+    def get_anchors(self, featmap_sizes, img_metas):
+        """Get anchors according to feature map sizes.
+
+        Args:
+            featmap_sizes (list[tuple]): Multi-level feature map sizes.
+            img_metas (list[dict]): Image meta info.
+
+        Returns:
+            tuple: anchors of each image, valid flags of each image
+        """
+        num_imgs = len(img_metas)
+        num_levels = len(featmap_sizes)
+
+        # since feature map sizes of all images are the same, we only compute
+        # anchors for one time
+        multi_level_anchors = []
+        for i in range(num_levels):
+            anchors = self.anchor_generators[i].grid_anchors(
+                featmap_sizes[i], self.anchor_strides[i])
+            multi_level_anchors.append(anchors)
+        anchor_list = [multi_level_anchors for _ in range(num_imgs)]
+
+        # for each image, we compute valid flags of multi level anchors
+        valid_flag_list = []
+        for img_id, img_meta in enumerate(img_metas):
+            multi_level_flags = []
+            for i in range(num_levels):
+                anchor_stride = self.anchor_strides[i]
+                feat_h, feat_w = featmap_sizes[i]
+                h, w, _ = img_meta['pad_shape']
+                valid_feat_h = min(int(np.ceil(h / anchor_stride)), feat_h)
+                valid_feat_w = min(int(np.ceil(w / anchor_stride)), feat_w)
+                flags = self.anchor_generators[i].valid_flags(
+                    (feat_h, feat_w), (valid_feat_h, valid_feat_w))
+                multi_level_flags.append(flags)
+            valid_flag_list.append(multi_level_flags)
+
+        return anchor_list, valid_flag_list
