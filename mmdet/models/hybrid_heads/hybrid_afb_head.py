@@ -10,10 +10,11 @@ from ..utils import bias_init_with_prob, ConvModule
 
 
 @HEADS.register_module
-class FSAFHead(nn.Module):
-    """Feature Selective Anchor-Free Head
+class HybridAFBHead(nn.Module):
+    """Feature Selective Hybrid Anchor-Free and Anchor-Based Head
 
     Args:
+    anchor free part:
         num_classes (int): Number of classes.
         in_channels (int): Number of channels in the input feature map.
         feat_channels (int): Number of channels of the feature map.
@@ -22,6 +23,15 @@ class FSAFHead(nn.Module):
         feat_strides (Iterable): Feature strides.
         conv_cfg (dict): The config dict for convolution layers.
         norm_cfg (dict): The config dict for normalization layers.
+    anchor based part:(adjust from ssd head)
+        input_size=300,
+        num_classes=21,
+        in_channels=(512, 1024, 512, 256, 256, 256),
+        anchor_strides=(8, 16, 32, 64, 100, 300),
+        basesize_ratio_range=(0.1, 0.9),
+        anchor_ratios=([2], [2, 3], [2, 3], [2, 3], [2], [2]),
+        target_means=(.0, .0, .0, .0),
+        target_stds=(1.0, 1.0, 1.0, 1.0)):
     """
 
     def __init__(self,
@@ -32,21 +42,99 @@ class FSAFHead(nn.Module):
                  norm_factor=4.0,
                  feat_strides=[8, 16, 32, 64, 128],
                  conv_cfg=None,
-                 norm_cfg=None):
-        super(FSAFHead, self).__init__()
+                 norm_cfg=None,
+                 input_size=300,
+                 num_classes=21,
+                 in_channels=(512, 1024, 512, 256, 256, 256),
+                 anchor_strides=(8, 16, 32, 64, 100, 300),
+                 basesize_ratio_range=(0.1, 0.9),
+                 anchor_ratios=([2], [2, 3], [2, 3], [2, 3], [2], [2]),
+                 target_means=(.0, .0, .0, .0),
+                 target_stds=(1.0, 1.0, 1.0, 1.0)):
+        super(HybridAFBHead, self).__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.feat_channels = feat_channels
         self.stacked_convs = stacked_convs
         self.norm_factor = norm_factor
         self.feat_strides = feat_strides
-        self.cls_out_channels = self.num_classes - 1
+        self.cls_out_channels_af = self.num_classes - 1
         self.conv_cfg = conv_cfg
         self.norm_cfg = norm_cfg
+        # anchor based part
+        self.input_size = input_size
+        self.num_classes = num_classes
+        self.in_channels = in_channels
+        self.cls_out_channels_ab = num_classes
+        num_anchors = [len(ratios) * 2 + 2 for ratios in anchor_ratios]
+        ab_reg_convs = []
+        ab_cls_convs = []
+        for i in range(len(in_channels)):
+            ab_reg_convs.append(
+                nn.Conv2d(
+                    in_channels[i],
+                    num_anchors[i] * 4,
+                    kernel_size=3,
+                    padding=1))
+            ab_cls_convs.append(
+                nn.Conv2d(
+                    in_channels[i],
+                    num_anchors[i] * num_classes,
+                    kernel_size=3,
+                    padding=1))
+        self.ab_reg_convs = nn.ModuleList(ab_reg_convs)
+        self.ab_cls_convs = nn.ModuleList(ab_cls_convs)
+
+        min_ratio, max_ratio = basesize_ratio_range
+        min_ratio = int(min_ratio * 100)
+        max_ratio = int(max_ratio * 100)
+        step = int(np.floor(max_ratio - min_ratio) / (len(in_channels) - 2))
+        min_sizes = []
+        max_sizes = []
+        for r in range(int(min_ratio), int(max_ratio) + 1, step):
+            min_sizes.append(int(input_size * r / 100))
+            max_sizes.append(int(input_size * (r + step) / 100))
+        if input_size == 300:
+            if basesize_ratio_range[0] == 0.15:  # SSD300 COCO
+                min_sizes.insert(0, int(input_size * 7 / 100))
+                max_sizes.insert(0, int(input_size * 15 / 100))
+            elif basesize_ratio_range[0] == 0.2:  # SSD300 VOC
+                min_sizes.insert(0, int(input_size * 10 / 100))
+                max_sizes.insert(0, int(input_size * 20 / 100))
+        elif input_size == 512:
+            if basesize_ratio_range[0] == 0.1:  # SSD512 COCO
+                min_sizes.insert(0, int(input_size * 4 / 100))
+                max_sizes.insert(0, int(input_size * 10 / 100))
+            elif basesize_ratio_range[0] == 0.15:  # SSD512 VOC
+                min_sizes.insert(0, int(input_size * 7 / 100))
+                max_sizes.insert(0, int(input_size * 15 / 100))
+        self.anchor_generators = []
+        self.anchor_strides = anchor_strides
+        for k in range(len(anchor_strides)):
+            base_size = min_sizes[k]
+            stride = anchor_strides[k]
+            ctr = ((stride - 1) / 2., (stride - 1) / 2.)
+            scales = [1., np.sqrt(max_sizes[k] / min_sizes[k])]
+            ratios = [1.]
+            for r in anchor_ratios[k]:
+                ratios += [1 / r, r]  # 4 or 6 ratio
+            anchor_generator = AnchorGenerator(
+                base_size, scales, ratios, scale_major=False, ctr=ctr)
+            indices = list(range(len(ratios)))
+            indices.insert(1, len(indices))
+            anchor_generator.base_anchors = torch.index_select(
+                anchor_generator.base_anchors, 0, torch.LongTensor(indices))
+            self.anchor_generators.append(anchor_generator)
+
+        self.target_means = target_means
+        self.target_stds = target_stds
+        self.use_sigmoid_cls = False
+        self.cls_focal_loss = False
 
         self._init_layers()
 
     def _init_layers(self):
+        # todo@laycoding: mv the anchor based layers initialization here
         self.relu = nn.ReLU(inplace=True)
         self.cls_convs = nn.ModuleList()
         self.reg_convs = nn.ModuleList()
@@ -71,7 +159,7 @@ class FSAFHead(nn.Module):
                     conv_cfg=self.conv_cfg,
                     norm_cfg=self.norm_cfg))
         self.fsaf_cls = nn.Conv2d(
-            self.feat_channels, self.cls_out_channels, 3, padding=1)
+            self.feat_channels, self.cls_out_channels_af, 3, padding=1)
         self.fsaf_reg = nn.Conv2d(self.feat_channels, 4, 3, padding=1)
 
     def init_weights(self):
@@ -82,28 +170,49 @@ class FSAFHead(nn.Module):
         bias_cls = bias_init_with_prob(0.01)
         normal_init(self.fsaf_cls, std=0.01, bias=bias_cls)
         normal_init(self.fsaf_reg, std=0.01, bias=0.1)
-
-    def forward_single(self, x):
-        cls_feat = x
-        reg_feat = x
-        for cls_conv in self.cls_convs:
-            cls_feat = cls_conv(cls_feat)
-        for reg_conv in self.reg_convs:
-            reg_feat = reg_conv(reg_feat)
-        cls_score = self.fsaf_cls(cls_feat)
-        bbox_pred = self.relu(self.fsaf_reg(reg_feat))
-        return cls_score, bbox_pred
+        # the anchor based part
+        for m in self.ab_cls_convs:
+            xavier_init(m, distribution='uniform', bias=0)
+        for m in self.ab_reg_convs:
+            xavier_init(m, distribution='uniform', bias=0)
 
     def forward(self, feats):
-        return multi_apply(self.forward_single, feats)
+        ab_cls_scores = []
+        ab_bbox_preds = []
+        af_cls_scores = []
+        af_bbox_preds = []
+        stacked_cls_feats = feats
+        stacked_reg_feats = feats
+        cls_feats = []
+        reg_feats = []
+        for cls_feat in stacked_cls_feats:
+            for cls_conv in self.cls_convs:
+                cls_feat = cls_conv(cls_feat)
+            cls_feats.append(cls_feat)
 
-    def loss_single(self, cls_score, bbox_pred, labels, label_weights,
+        for reg_feat in stacked_reg_feats:
+            for reg_conv in self.reg_convs:
+                reg_feat = reg_conv(reg_feat)
+            reg_feats.append(reg_feat)   
+        # anchor based part
+        for cls_feat, reg_feat, reg_conv, cls_conv in zip(cls_feats, reg_feats, self.ab_reg_convs,
+                                            self.ab_cls_convs):
+            ab_cls_scores.append(cls_conv(cls_feat))
+            ab_bbox_preds.append(reg_conv(reg_feat))
+        # anchor free part
+        for cls_feat, reg_feat in zip(cls_feats, reg_feats):
+            af_cls_scores.append(self.fsaf_cls(cls_feat))
+            af_bbox_preds.append(self.fsaf_reg(reg_feat))
+
+        return ab_cls_scores, ab_bbox_preds, af_cls_scores, af_bbox_preds
+
+    def af_loss_single(self, cls_score, bbox_pred, labels, label_weights,
                     bbox_targets, bbox_locs, num_total_samples, cfg):
         # classification loss
         labels = labels.reshape(-1)
         label_weights = label_weights.reshape(-1)
         cls_score = cls_score.permute(0, 2, 3,
-                                      1).reshape(-1, self.cls_out_channels)
+                                      1).reshape(-1, self.cls_out_channels_af)
         loss_cls = weighted_sigmoid_focal_loss(
             cls_score,
             labels,
@@ -125,17 +234,44 @@ class FSAFHead(nn.Module):
                 avg_factor=num_total_samples)
         return loss_cls, loss_reg
 
+    def ab_loss_single(self, cls_score, bbox_pred, labels, label_weights,
+                    bbox_targets, bbox_weights, num_total_samples, cfg):
+        loss_cls_all = F.cross_entropy(
+            cls_score, labels, reduction='none') * label_weights
+        pos_inds = (labels > 0).nonzero().view(-1)
+        neg_inds = (labels == 0).nonzero().view(-1)
+
+        num_pos_samples = pos_inds.size(0)
+        num_neg_samples = cfg.neg_pos_ratio * num_pos_samples
+        if num_neg_samples > neg_inds.size(0):
+            num_neg_samples = neg_inds.size(0)
+        topk_loss_cls_neg, _ = loss_cls_all[neg_inds].topk(num_neg_samples)
+        loss_cls_pos = loss_cls_all[pos_inds].sum()
+        loss_cls_neg = topk_loss_cls_neg.sum()
+        loss_cls = (loss_cls_pos + loss_cls_neg) / num_total_samples
+
+        loss_bbox = weighted_smoothl1(
+            bbox_pred,
+            bbox_targets,
+            bbox_weights,
+            beta=cfg.smoothl1_beta,
+            avg_factor=num_total_samples)
+        return loss_cls[None], loss_bbox
+
     def loss(self,
-             cls_scores,
-             bbox_preds,
+             ab_cls_scores,
+             ab_bbox_preds,
+             af_cls_scores,
+             af_bbox_preds,
              gt_bboxes,
              gt_labels,
              img_metas,
              cfg,
              gt_bboxes_ignore=None):
-        cls_reg_targets = self.point_target(
-            cls_scores,
-            bbox_preds,
+        # anchor free part
+        af_cls_reg_targets = self.point_target(
+            af_cls_scores,
+            af_bbox_preds,
             gt_bboxes,
             img_metas,
             cfg,
@@ -143,20 +279,71 @@ class FSAFHead(nn.Module):
             gt_bboxes_ignore_list=gt_bboxes_ignore)
         # if cls_reg_targets is None:
         #     return None
-        (labels_list, label_weights_list, bbox_targets_list, bbox_locs_list,
-         num_total_pos, num_total_neg) = cls_reg_targets
-        num_total_samples = num_total_pos
-        losses_cls, losses_reg = multi_apply(
-            self.loss_single,
-            cls_scores,
-            bbox_preds,
-            labels_list,
-            label_weights_list,
-            bbox_targets_list,
-            bbox_locs_list,
-            num_total_samples=num_total_samples,
+        (af_labels_list, af_label_weights_list, af_bbox_targets_list, af_bbox_locs_list,
+         af_num_total_pos, af_num_total_neg) = af_cls_reg_targets
+        af_num_total_samples = af_num_total_pos
+        af_losses_cls, af_losses_reg = multi_apply(
+            self.af_loss_single,
+            af_cls_scores,
+            af_bbox_preds,
+            af_labels_list,
+            af_label_weights_list,
+            af_bbox_targets_list,
+            af_bbox_locs_list,
+            num_total_samples=af_num_total_samples,
             cfg=cfg)
-        return dict(loss_cls=losses_cls, loss_reg=losses_reg)
+        # anchor based part
+        featmap_sizes = [featmap.size()[-2:] for featmap in ab_cls_scores]
+        assert len(featmap_sizes) == len(self.anchor_generators)
+
+        anchor_list, valid_flag_list = self.get_anchors(
+            featmap_sizes, img_metas)
+        ab_cls_reg_targets = anchor_target(
+            anchor_list,
+            valid_flag_list,
+            gt_bboxes,
+            img_metas,
+            self.target_means,
+            self.target_stds,
+            cfg,
+            gt_bboxes_ignore_list=gt_bboxes_ignore,
+            gt_labels_list=gt_labels,
+            label_channels=1,
+            sampling=False,
+            unmap_outputs=False)
+        if cls_reg_targets is None:
+            return None
+        (ab_labels_list, ab_label_weights_list, ab_bbox_targets_list, ab_bbox_weights_list,
+         ab_num_total_pos, ab_num_total_neg) = ab_cls_reg_targets
+
+        num_images = len(img_metas)
+        ab_all_cls_scores = torch.cat([
+            s.permute(0, 2, 3, 1).reshape(
+                num_images, -1, self.cls_out_channels_ab) for s in ab_cls_scores
+        ], 1)
+        ab_all_labels = torch.cat(ab_labels_list, -1).view(num_images, -1)
+        ab_all_label_weights = torch.cat(ab_label_weights_list,
+                                      -1).view(num_images, -1)
+        ab_all_bbox_preds = torch.cat([
+            b.permute(0, 2, 3, 1).reshape(num_images, -1, 4)
+            for b in ab_bbox_preds
+        ], -2)
+        ab_all_bbox_targets = torch.cat(ab_bbox_targets_list,
+                                     -2).view(num_images, -1, 4)
+        ab_all_bbox_weights = torch.cat(ab_bbox_weights_list,
+                                     -2).view(num_images, -1, 4)
+
+        ab_losses_cls, ab_losses_bbox = multi_apply(
+            self.ab_loss_single,
+            ab_all_cls_scores,
+            ab_all_bbox_preds,
+            ab_all_labels,
+            ab_all_label_weights,
+            ab_all_bbox_targets,
+            ab_all_bbox_weights,
+            num_total_samples=ab_num_total_pos,
+            cfg=cfg)
+        return dict(ab_loss_cls=ab_losses_cls, ab_loss_reg=ab_losses_reg, af_loss_cls=af_losses_cls, af_loss_reg=af_losses_reg)
 
     def point_target(self,
                      cls_scores,
@@ -422,77 +609,6 @@ class FSAFHead(nn.Module):
                               dim=0))
         return level_target
 
-    def get_bboxes(self, cls_scores, bbox_preds, img_metas, cfg,
-                   rescale=False):
-        num_levels = len(self.feat_strides)
-        assert len(cls_scores) == len(bbox_preds) == num_levels
-        device = bbox_preds[0].device
-        dtype = bbox_preds[0].dtype
-
-        mlvl_points = [
-            self.generate_points(
-                bbox_preds[i].size()[-2:],
-                self.feat_strides[i],
-                device=device,
-                dtype=dtype) for i in range(num_levels)
-        ]
-
-        result_list = []
-        for img_id in range(len(img_metas)):
-            cls_score_list = [
-                cls_scores[i][img_id].detach() for i in range(num_levels)
-            ]
-            bbox_pred_list = [
-                bbox_preds[i][img_id].detach() * self.feat_strides[i] *
-                self.norm_factor for i in range(num_levels)
-            ]
-            img_shape = img_metas[img_id]['img_shape']
-            scale_factor = img_metas[img_id]['scale_factor']
-            proposals = self.get_bboxes_single(cls_score_list, bbox_pred_list,
-                                               mlvl_points, img_shape,
-                                               scale_factor, cfg, rescale)
-            result_list.append(proposals)
-        return result_list
-
-    def get_bboxes_single(self,
-                          cls_scores,
-                          bbox_preds,
-                          mlvl_points,
-                          img_shape,
-                          scale_factor,
-                          cfg,
-                          rescale=False):
-        assert len(cls_scores) == len(bbox_preds) == len(mlvl_points)
-        mlvl_bboxes = []
-        mlvl_scores = []
-        for cls_score, bbox_pred, points in zip(cls_scores, bbox_preds,
-                                                mlvl_points):
-            assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
-            cls_score = cls_score.permute(1, 2,
-                                          0).reshape(-1, self.cls_out_channels)
-            scores = cls_score.sigmoid()
-            bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 4)
-            nms_pre = cfg.get('nms_pre', -1)
-            if nms_pre > 0 and scores.shape[0] > nms_pre:
-                max_scores, _ = scores.max(dim=1)
-                _, topk_inds = max_scores.topk(nms_pre)
-                bbox_pred = bbox_pred[topk_inds, :]
-                scores = scores[topk_inds, :]
-                points = points[topk_inds, :]
-            bboxes = distance2bbox(points, bbox_pred, img_shape)
-            mlvl_bboxes.append(bboxes)
-            mlvl_scores.append(scores)
-        mlvl_bboxes = torch.cat(mlvl_bboxes)
-        if rescale:
-            mlvl_bboxes /= mlvl_bboxes.new_tensor(scale_factor)
-        mlvl_scores = torch.cat(mlvl_scores)
-        padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
-        mlvl_scores = torch.cat([padding, mlvl_scores], dim=1)
-        det_bboxes, det_labels = multiclass_nms(mlvl_bboxes, mlvl_scores,
-                                                cfg.score_thr, cfg.nms,
-                                                cfg.max_per_img)
-        return det_bboxes, det_labels
-
     def generate_points(self,
                         featmap_size,
                         stride=16,
@@ -511,3 +627,122 @@ class FSAFHead(nn.Module):
         xx = x.repeat(len(y))
         yy = y.view(-1, 1).repeat(1, len(x)).view(-1)
         return xx, yy
+
+    def get_bboxes(self, ab_cls_scores, ab_bbox_preds, af_cls_scores, af_bbox_preds, img_metas, cfg,
+                   rescale=False):
+        # get the bboxes from two method and ensemble them
+        num_levels = len(self.feat_strides)
+        assert len(ab_cls_scores) == len(ab_bbox_preds) == len(af_cls_scores) == len(af_bbox_preds) == num_levels
+        device = af_bbox_preds[0].device
+        dtype = af_bbox_preds[0].dtype
+        # get the multilevel points based on anchor free outputs
+        mlvl_points = [
+            self.generate_points(
+                af_bbox_preds[i].size()[-2:],
+                self.feat_strides[i],
+                device=device,
+                dtype=dtype) for i in range(num_levels)
+        ]
+
+        result_list = []
+        for img_id in range(len(img_metas)):
+            af_cls_score_list = [
+                af_cls_scores[i][img_id].detach() for i in range(num_levels)
+            ]
+            af_bbox_pred_list = [
+                af_bbox_preds[i][img_id].detach() * self.feat_strides[i] *
+                self.norm_factor for i in range(num_levels)
+            ]
+            ab_cls_score_list = [
+                ab_cls_scores[i][img_id].detach() for i in range(num_levels)
+            ]
+            ab_bbox_pred_list = [
+                ab_bbox_preds[i][img_id].detach() for i in range(num_levels)
+            ]
+            img_shape = img_metas[img_id]['img_shape']
+            scale_factor = img_metas[img_id]['scale_factor']
+            proposals = self.get_bboxes_single(af_cls_score_list, af_bbox_pred_list, mlvl_points,
+                                               ab_cls_score_list, ab_bbox_pred_list, mlvl_anchors,
+                                               img_shape, scale_factor, cfg, rescale)
+            result_list.append(proposals)
+        return result_list
+
+    def get_bboxes_single(self,
+                          af_cls_scores,
+                          af_bbox_preds,
+                          mlvl_points,
+                          ab_cls_scores,
+                          ab_bbox_preds,
+                          mlvl_anchors,
+                          img_shape,
+                          scale_factor,
+                          cfg,
+                          rescale=False):
+        assert len(ab_cls_scores) == len(ab_bbox_preds) == len(af_cls_scores) == len(af_bbox_preds) == len(mlvl_points)
+        af_mlvl_bboxes = []
+        af_mlvl_scores = []
+        ab_mlvl_bboxes = []
+        ab_mlvl_scores = []
+        # the anchor free part
+        for af_cls_score, af_bbox_pred, af_points in zip(af_cls_scores, af_bbox_preds,
+                                                af_mlvl_points):
+            assert af_cls_score.size()[-2:] == af_bbox_pred.size()[-2:]
+            af_cls_score = af_cls_score.permute(1, 2,
+                                          0).reshape(-1, self.cls_out_channels_af)
+            af_scores = af_cls_score.sigmoid()
+            af_bbox_pred = af_bbox_pred.permute(1, 2, 0).reshape(-1, 4)
+            nms_pre = cfg.get('nms_pre', -1)
+            if nms_pre > 0 and af_scores.shape[0] > nms_pre:
+                max_scores, _ = af_scores.max(dim=1)
+                _, topk_inds = max_scores.topk(nms_pre)
+                af_bbox_pred = af_bbox_pred[topk_inds, :]
+                af_scores = af_scores[topk_inds, :]
+                af_points = af_points[topk_inds, :]
+            af_bboxes = distance2bbox(af_points, af_bbox_pred, img_shape)
+            af_mlvl_bboxes.append(af_bboxes)
+            af_mlvl_scores.append(af_scores)
+        af_mlvl_bboxes = torch.cat(af_mlvl_bboxes)
+        if rescale:
+            af_mlvl_bboxes /= af_mlvl_bboxes.new_tensor(scale_factor)
+        af_mlvl_scores = torch.cat(af_mlvl_scores)
+        af_padding = af_mlvl_scores.new_zeros(af_mlvl_scores.shape[0], 1)
+        af_mlvl_scores = torch.cat([af_padding, af_mlvl_scores], dim=1)
+        # the anchor based part
+        for ab_cls_score, ab_bbox_pred, ab_anchors in zip(ab_cls_scores, ab_bbox_preds,
+                                                 ab_mlvl_anchors):
+            assert ab_cls_score.size()[-2:] == ab_bbox_pred.size()[-2:]
+            ab_cls_score = ab_cls_score.permute(1, 2,
+                                          0).reshape(-1, self.cls_out_channels_ab)
+            if self.use_sigmoid_cls:
+                ab_scores = ab_cls_score.sigmoid()
+            else:
+                ab_scores = ab_cls_score.softmax(-1)
+            ab_bbox_pred = ab_bbox_pred.permute(1, 2, 0).reshape(-1, 4)
+            nms_pre = cfg.get('nms_pre', -1)
+            if nms_pre > 0 and scores.shape[0] > nms_pre:
+                if self.use_sigmoid_cls:
+                    max_scores, _ = ab_scores.max(dim=1)
+                else:
+                    max_scores, _ = ab_scores[:, 1:].max(dim=1)
+                _, topk_inds = max_scores.topk(nms_pre)
+                ab_anchors = ab_anchors[topk_inds, :]
+                ab_bbox_pred = ab_bbox_pred[topk_inds, :]
+                ab_scores = ab_scores[topk_inds, :]
+            ab_bboxes = delta2bbox(ab_anchors, ab_bbox_pred, self.target_means,
+                                self.target_stds, img_shape)
+            ab_mlvl_bboxes.append(ab_bboxes)
+            ab_mlvl_scores.append(ab_scores)
+        ab_mlvl_bboxes = torch.cat(ab_mlvl_bboxes)
+        if rescale:
+            ab_mlvl_bboxes /= ab_mlvl_bboxes.new_tensor(scale_factor)
+        ab_mlvl_scores = torch.cat(ab_mlvl_scores)
+        if self.use_sigmoid_cls:
+            ab_padding = ab_mlvl_scores.new_zeros(ab_mlvl_scores.shape[0], 1)
+            ab_mlvl_scores = torch.cat([ab_padding, ab_mlvl_scores], dim=1)
+        # ensemble them (N x 4) (N x C)
+        mlvl_bboxes = torch.cat((ab_mlvl_bboxes, af_mlvl_bboxes))
+        mlvl_scores = torch.cat((ab_mlvl_scores, af_mlvl_scores))
+        det_bboxes, det_labels = multiclass_nms(mlvl_bboxes, mlvl_scores,
+                                                cfg.score_thr, cfg.nms,
+                                                cfg.max_per_img)
+        return det_bboxes, det_labels
