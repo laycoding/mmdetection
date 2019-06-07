@@ -204,7 +204,7 @@ class HybridAFBHead(nn.Module):
         # anchor free part
         for cls_feat, reg_feat in zip(cls_feats, reg_feats):
             af_cls_scores.append(self.fsaf_cls(cls_feat))
-            af_bbox_preds.append(self.fsaf_reg(reg_feat))
+            af_bbox_preds.append(self.relu(self.fsaf_reg(reg_feat)))
 
         return ab_cls_scores, ab_bbox_preds, af_cls_scores, af_bbox_preds
 
