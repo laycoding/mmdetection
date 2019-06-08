@@ -645,7 +645,11 @@ class HybridAFBHead(nn.Module):
                 device=device,
                 dtype=dtype) for i in range(num_levels)
         ]
-
+        mlvl_anchors = [
+            self.anchor_generators[i].grid_anchors(ab_cls_scores[i].size()[-2:],
+                                                   self.anchor_strides[i])
+            for i in range(num_levels)
+        ]
         result_list = []
         for img_id in range(len(img_metas)):
             af_cls_score_list = [
@@ -672,15 +676,15 @@ class HybridAFBHead(nn.Module):
     def get_bboxes_single(self,
                           af_cls_scores,
                           af_bbox_preds,
-                          mlvl_points,
+                          af_mlvl_points,
                           ab_cls_scores,
                           ab_bbox_preds,
-                          mlvl_anchors,
+                          ab_mlvl_anchors,
                           img_shape,
                           scale_factor,
                           cfg,
                           rescale=False):
-        assert len(ab_cls_scores) == len(ab_bbox_preds) == len(af_cls_scores) == len(af_bbox_preds) == len(mlvl_points)
+        assert len(ab_cls_scores) == len(ab_bbox_preds) == len(af_cls_scores) == len(af_bbox_preds) == len(af_mlvl_points)
         af_mlvl_bboxes = []
         af_mlvl_scores = []
         ab_mlvl_bboxes = []
@@ -721,7 +725,7 @@ class HybridAFBHead(nn.Module):
                 ab_scores = ab_cls_score.softmax(-1)
             ab_bbox_pred = ab_bbox_pred.permute(1, 2, 0).reshape(-1, 4)
             nms_pre = cfg.get('nms_pre', -1)
-            if nms_pre > 0 and scores.shape[0] > nms_pre:
+            if nms_pre > 0 and ab_scores.shape[0] > nms_pre:
                 if self.use_sigmoid_cls:
                     max_scores, _ = ab_scores.max(dim=1)
                 else:
