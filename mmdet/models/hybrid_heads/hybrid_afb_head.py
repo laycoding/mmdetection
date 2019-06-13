@@ -51,7 +51,10 @@ class HybridAFBHead(nn.Module):
                  basesize_ratio_range=(0.1, 0.9),
                  anchor_ratios=([2], [2, 3], [2, 3], [2, 3], [2]),
                  target_means=(.0, .0, .0, .0),
-                 target_stds=(1.0, 1.0, 1.0, 1.0)):
+                 target_stds=(1.0, 1.0, 1.0, 1.0),
+                 loss_cls=dict(
+                     type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0),
+                 loss_bbox=dict(type='SmoothL1Loss', beta=1.0 / 9.0, loss_weight=1.0)):
         super(HybridAFBHead, self).__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels

@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmcv.cnn import xavier_init
+from mmcv.cnn import xavier_init, normal_init
 
 from mmdet.core import (AnchorGenerator, anchor_target, weighted_smoothl1,
                         multi_apply)
@@ -96,7 +96,8 @@ class SSDHead(AnchorHead):
     def init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
-                xavier_init(m, distribution='uniform', bias=0)
+                # xavier_init(m, distribution='uniform', bias=0)
+                normal_init(m, std=0.01, bias=0.1)
 
     def forward(self, feats):
         cls_scores = []

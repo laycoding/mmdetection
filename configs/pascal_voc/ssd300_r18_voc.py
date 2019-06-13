@@ -14,33 +14,17 @@ model = dict(
         style='pytorch'),
     neck=None,
     bbox_head=dict(
-        type='RefineFSAFHead',
-        num_classes=21,
-        in_channels=128,
-        stacked_convs=1,
-        feat_channels=128,
-        norm_factor=4.0,
-        feat_strides=[8, 16, 32, 64, 128],
+        type='SSDHead',
         input_size=input_size,
-        share_weight=True,
+        in_channels=(128, 128, 128, 128, 128),
+        num_classes=21,
+        anchor_strides=(8, 16, 32, 64, 100),
+        basesize_ratio_range=(0.2, 0.9),
+        anchor_ratios=([2], [2, 3], [2, 3], [2, 3], [2]),
         target_means=(.0, .0, .0, .0),
-        target_stds=(0.1, 0.1, 0.2, 0.2),
-        loss_cls=dict(
-            type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0),
-        loss_bbox=dict(type='SmoothL1Loss', beta=1.0 / 9.0, loss_weight=1.0)))
-# training and testing settings
+        target_stds=(0.1, 0.1, 0.2, 0.2)))
+cudnn_benchmark = True
 train_cfg = dict(
-    pos_scale=0.2,
-    ignore_scale=0.5,
-    gamma=2.0,
-    alpha=0.25,
-    canonical_scale=224.0,
-    canonical_level=2,
-    bbox_reg_weight=1.0,
-    online_select=True,
-    allowed_border=-1,
-    pos_weight=-1,
-    debug=False,
     assigner=dict(
         type='MaxIoUAssigner',
         pos_iou_thr=0.5,
@@ -49,20 +33,23 @@ train_cfg = dict(
         ignore_iof_thr=-1,
         gt_max_assign_all=False),
     smoothl1_beta=1.,
-    neg_pos_ratio=3)
+    allowed_border=-1,
+    pos_weight=-1,
+    neg_pos_ratio=3,
+    debug=False)
 test_cfg = dict(
-    nms_pre=1000,
-    min_bbox_size=0,
-    score_thr=0.05,
     nms=dict(type='nms', iou_thr=0.45),
+    min_bbox_size=0,
+    score_thr=0.02,
     max_per_img=200)
+# model training and testing settings
 # dataset settings
 dataset_type = 'VOCDataset'
 data_root = 'data/VOCdevkit/'
 img_norm_cfg = dict(mean=[123.675, 116.28, 103.53], std=[1, 1, 1], to_rgb=True)
 data = dict(
     imgs_per_gpu=4,
-    workers_per_gpu=8,
+    workers_per_gpu=2,
     train=dict(
         type='RepeatDataset',
         times=10,
@@ -119,15 +106,15 @@ data = dict(
         test_mode=True,
         resize_keep_ratio=False))
 # optimizer
-optimizer = dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001)
-optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
+optimizer = dict(type='SGD', lr=1e-3, momentum=0.9, weight_decay=5e-4)
+optimizer_config = dict()
 # learning policy
 lr_config = dict(
     policy='step',
     warmup='linear',
     warmup_iters=500,
     warmup_ratio=1.0 / 3,
-    step=[16, 22])
+    step=[16, 20])
 checkpoint_config = dict(interval=1)
 # yapf:disable
 log_config = dict(
@@ -141,7 +128,7 @@ log_config = dict(
 total_epochs = 24
 dist_params = dict(backend='nccl')
 log_level = 'INFO'
-work_dir = './work_dirs/refine_fsaf_ssd300_r18_1x'
+work_dir = './work_dirs/ssd300_r18_voc'
 load_from = None
 resume_from = None
 workflow = [('train', 1)]

@@ -2,10 +2,12 @@ from __future__ import division
 import numpy as np
 import torch
 import torch.nn as nn
-from mmcv.cnn import normal_init
+import torch.nn.functional as F
+from mmcv.cnn import normal_init, xavier_init
 from mmdet.core import (multi_apply, multiclass_nms, distance2bbox,
                         weighted_sigmoid_focal_loss, select_iou_loss, 
-                        AnchorGenerator, anchor_target, delta2bbox)
+                        AnchorGenerator, anchor_target, delta2bbox,
+                        weighted_smoothl1, )
 
 from ..registry import HEADS
 from ..utils import bias_init_with_prob, ConvModule
@@ -37,9 +39,15 @@ class RefineFSAFHead(nn.Module):
                  feat_strides=[8, 16, 32, 64, 128],
                  conv_cfg=None,
                  norm_cfg=None,
+                 input_size=300,
                  share_weight=True,
-                 use_sigmoid_cls=False):
-        super(FSAFHead, self).__init__()
+                 use_sigmoid_cls=False,
+                 target_means=(.0, .0, .0, .0),
+                 target_stds=(1.0, 1.0, 1.0, 1.0),
+                 loss_cls=dict(
+                     type='CrossEntropyLoss', use_sigmoid=False, loss_weight=1.0),
+                 loss_bbox=dict(type='SmoothL1Loss', beta=1.0 / 9.0, loss_weight=1.0)):
+        super(RefineFSAFHead, self).__init__()
         self.num_classes = num_classes
         self.in_channels = in_channels
         self.feat_channels = feat_channels
@@ -230,6 +238,31 @@ class RefineFSAFHead(nn.Module):
                 avg_factor=num_total_samples)
         return loss_cls, loss_reg
 
+    def refine_loss_single(self, cls_score, bbox_pred, labels, label_weights,
+                    bbox_targets, bbox_weights, num_total_samples, cfg):
+        # for now, it might be duplicate with anchor head
+        loss_cls_all = F.cross_entropy(
+            cls_score, labels, reduction='none') * label_weights
+        pos_inds = (labels > 0).nonzero().view(-1)
+        neg_inds = (labels == 0).nonzero().view(-1)
+
+        num_pos_samples = pos_inds.size(0)
+        num_neg_samples = cfg.neg_pos_ratio * num_pos_samples
+        if num_neg_samples > neg_inds.size(0):
+            num_neg_samples = neg_inds.size(0)
+        topk_loss_cls_neg, _ = loss_cls_all[neg_inds].topk(num_neg_samples)
+        loss_cls_pos = loss_cls_all[pos_inds].sum()
+        loss_cls_neg = topk_loss_cls_neg.sum()
+        loss_cls = (loss_cls_pos + loss_cls_neg) / num_total_samples
+
+        loss_bbox = weighted_smoothl1(
+            bbox_pred,
+            bbox_targets,
+            bbox_weights,
+            beta=cfg.smoothl1_beta,
+            avg_factor=num_total_samples)
+        return loss_cls[None], loss_bbox
+
     def loss(self,
              fsaf_cls_scores,
              fsaf_bbox_preds,
@@ -264,7 +297,8 @@ class RefineFSAFHead(nn.Module):
             num_total_samples=fsaf_num_total_samples,
             cfg=cfg)
         # the additional refinement part
-        refine_anchor_list, refine_valid_flag_list = self.get_fsaf_anchors(featmap_sizes, img_metas)
+        refine_anchor_list, refine_valid_flag_list = self.get_fsaf_anchors(fsaf_cls_scores, fsaf_bbox_preds, img_metas, cfg,
+                   rescale=False)
         refine_cls_reg_targets = anchor_target(
             refine_anchor_list,
             refine_valid_flag_list,
@@ -284,33 +318,35 @@ class RefineFSAFHead(nn.Module):
          refine_num_total_pos, refine_num_total_neg) = refine_cls_reg_targets
 
         num_images = len(img_metas)
-        all_cls_scores = torch.cat([
+        refine_all_cls_scores = torch.cat([
             s.permute(0, 2, 3, 1).reshape(
-                num_images, -1, self.refine_cls_out_channels) for s in cls_scores
+                num_images, -1, self.refine_cls_out_channels) for s in refine_cls_scores
         ], 1)
-        all_labels = torch.cat(labels_list, -1).view(num_images, -1)
-        all_label_weights = torch.cat(label_weights_list,
+        refine_all_labels = torch.cat(refine_labels_list, -1).view(num_images, -1)
+        refine_all_label_weights = torch.cat(refine_label_weights_list,
                                       -1).view(num_images, -1)
-        all_bbox_preds = torch.cat([
+        refine_all_bbox_preds = torch.cat([
             b.permute(0, 2, 3, 1).reshape(num_images, -1, 4)
-            for b in bbox_preds
+            for b in refine_bbox_preds
         ], -2)
-        all_bbox_targets = torch.cat(bbox_targets_list,
+        refine_all_bbox_targets = torch.cat(refine_bbox_targets_list,
                                      -2).view(num_images, -1, 4)
-        all_bbox_weights = torch.cat(bbox_weights_list,
+        refine_all_bbox_weights = torch.cat(refine_bbox_weights_list,
                                      -2).view(num_images, -1, 4)
 
-        losses_cls, losses_bbox = multi_apply(
-            self.loss_single,
-            all_cls_scores,
-            all_bbox_preds,
-            all_labels,
-            all_label_weights,
-            all_bbox_targets,
-            all_bbox_weights,
-            num_total_samples=num_total_pos,
+        refine_losses_cls, refine_losses_bbox = multi_apply(
+            self.refine_loss_single,
+            refine_all_cls_scores,
+            refine_all_bbox_preds,
+            refine_all_labels,
+            refine_all_label_weights,
+            refine_all_bbox_targets,
+            refine_all_bbox_weights,
+            num_total_samples=refine_num_total_pos,
             cfg=cfg)
-        return dict(fsaf_loss_cls=fsaf_losses_cls, fsaf_loss_reg=fsaf_losses_reg)
+
+        return dict(fsaf_loss_cls=fsaf_losses_cls, fsaf_loss_reg=fsaf_losses_reg, 
+            refine_losses_cls=refine_losses_cls, refine_losses_bbox=refine_losses_bbox)
 
     def point_target(self,
                      cls_scores,
@@ -576,34 +612,27 @@ class RefineFSAFHead(nn.Module):
                               dim=0))
         return level_target
 
-    def get_bboxes(self, cls_scores, bbox_preds, img_metas, cfg,
-                   rescale=False):
+    def get_bboxes(self, fsaf_cls_scores, fsaf_bbox_preds, refine_cls_scores, refine_bbox_preds,
+                     img_metas, cfg, rescale=False):
         num_levels = len(self.feat_strides)
-        assert len(cls_scores) == len(bbox_preds) == num_levels
-        device = bbox_preds[0].device
-        dtype = bbox_preds[0].dtype
-
-        mlvl_points = [
-            self.generate_points(
-                bbox_preds[i].size()[-2:],
-                self.feat_strides[i],
-                device=device,
-                dtype=dtype) for i in range(num_levels)
-        ]
-
+        # get the fsaf branch output first
+        mlvl_refine_anchors, refine_valid_flag_list = self.get_fsaf_anchors(fsaf_cls_scores, fsaf_bbox_preds, img_metas, cfg,
+                   rescale=False)
         result_list = []
         for img_id in range(len(img_metas)):
             cls_score_list = [
-                cls_scores[i][img_id].detach() for i in range(num_levels)
+                refine_cls_scores[i][img_id].detach() for i in range(num_levels)
             ]
             bbox_pred_list = [
-                bbox_preds[i][img_id].detach() * self.feat_strides[i] *
-                self.norm_factor for i in range(num_levels)
+                refine_bbox_preds[i][img_id].detach() for i in range(num_levels)
+            ]
+            mlvl_refine_anchors_list = [
+                mlvl_refine_anchors[img_id][i].detach() for i in range(num_levels)
             ]
             img_shape = img_metas[img_id]['img_shape']
             scale_factor = img_metas[img_id]['scale_factor']
             proposals = self.get_bboxes_single(cls_score_list, bbox_pred_list,
-                                               mlvl_points, img_shape,
+                                               mlvl_refine_anchors_list, img_shape,
                                                scale_factor, cfg, rescale)
             result_list.append(proposals)
         return result_list
@@ -611,37 +640,45 @@ class RefineFSAFHead(nn.Module):
     def get_bboxes_single(self,
                           cls_scores,
                           bbox_preds,
-                          mlvl_points,
+                          mlvl_anchors,
                           img_shape,
                           scale_factor,
                           cfg,
                           rescale=False):
-        assert len(cls_scores) == len(bbox_preds) == len(mlvl_points)
+        assert len(cls_scores) == len(bbox_preds) == len(mlvl_anchors)
         mlvl_bboxes = []
         mlvl_scores = []
-        for cls_score, bbox_pred, points in zip(cls_scores, bbox_preds,
-                                                mlvl_points):
+        for cls_score, bbox_pred, anchors in zip(cls_scores, bbox_preds,
+                                                 mlvl_anchors):
             assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
             cls_score = cls_score.permute(1, 2,
-                                          0).reshape(-1, self.cls_out_channels)
-            scores = cls_score.sigmoid()
+                                          0).reshape(-1, self.refine_cls_out_channels)
+            if self.refine_use_sigmoid_cls:
+                scores = cls_score.sigmoid()
+            else:
+                scores = cls_score.softmax(-1)
             bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 4)
             nms_pre = cfg.get('nms_pre', -1)
             if nms_pre > 0 and scores.shape[0] > nms_pre:
-                max_scores, _ = scores.max(dim=1)
+                if self.refine_use_sigmoid_cls:
+                    max_scores, _ = scores.max(dim=1)
+                else:
+                    max_scores, _ = scores[:, 1:].max(dim=1)
                 _, topk_inds = max_scores.topk(nms_pre)
+                anchors = anchors[topk_inds, :]
                 bbox_pred = bbox_pred[topk_inds, :]
                 scores = scores[topk_inds, :]
-                points = points[topk_inds, :]
-            bboxes = distance2bbox(points, bbox_pred, img_shape)
+            bboxes = delta2bbox(anchors, bbox_pred, self.target_means,
+                                self.target_stds, img_shape)
             mlvl_bboxes.append(bboxes)
             mlvl_scores.append(scores)
         mlvl_bboxes = torch.cat(mlvl_bboxes)
         if rescale:
             mlvl_bboxes /= mlvl_bboxes.new_tensor(scale_factor)
         mlvl_scores = torch.cat(mlvl_scores)
-        padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
-        mlvl_scores = torch.cat([padding, mlvl_scores], dim=1)
+        if self.refine_use_sigmoid_cls:
+            padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
+            mlvl_scores = torch.cat([padding, mlvl_scores], dim=1)
         det_bboxes, det_labels = multiclass_nms(mlvl_bboxes, mlvl_scores,
                                                 cfg.score_thr, cfg.nms,
                                                 cfg.max_per_img)
@@ -715,12 +752,12 @@ class RefineFSAFHead(nn.Module):
         for img_id, img_meta in enumerate(img_metas):
             multi_level_flags = []
             for i in range(num_levels):
-                flags = torch.ones_like(anchor_list[img_id][i])
+                flags = torch.ones_like(anchor_list[img_id][i][:,0], dtype=torch.uint8)
                 multi_level_flags.append(flags)
             valid_flag_list.append(multi_level_flags)
 
         return anchor_list, valid_flag_list
-        
+
     def get_anchors_single(self,
                           cls_scores,
                           bbox_preds,
@@ -739,16 +776,15 @@ class RefineFSAFHead(nn.Module):
                                           0).reshape(-1, self.cls_out_channels)
             scores = cls_score.sigmoid()
             bbox_pred = bbox_pred.permute(1, 2, 0).reshape(-1, 4)
-            nms_pre = cfg.get('nms_pre', -1)
-
             bboxes = distance2bbox(points, bbox_pred, img_shape)
             mlvl_bboxes.append(bboxes)
             mlvl_scores.append(scores)
-        mlvl_bboxes = torch.cat(mlvl_bboxes)
+        # mlvl_bboxes = torch.cat(mlvl_bboxes)
         if rescale:
             mlvl_bboxes /= mlvl_bboxes.new_tensor(scale_factor)
-        mlvl_scores = torch.cat(mlvl_scores)
-        padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
-        mlvl_scores = torch.cat([padding, mlvl_scores], dim=1)
+        # mlvl_scores = torch.cat(mlvl_scores)
+        # padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
+        # mlvl_scores = torch.cat([padding, mlvl_scores], dim=1)
+        # since mlvl not concatenated, it doesn't has the neg scores
 
         return mlvl_bboxes, mlvl_scores
