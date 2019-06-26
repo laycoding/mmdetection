@@ -22,21 +22,21 @@ def add_extras(in_channel, batch_norm=False):
     layers += [nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1)]
     return layers
 
-def add_extras_ssd(size, in_channel, out_channel, batch_norm=False):
+def add_extras_ssd(size, in_channel, batch_norm=False):
     # Extra layers added to resnet for feature scaling
     layers = []
     layers += [nn.Conv2d(in_channel, 256, kernel_size=1, stride=1)]
-    layers += [nn.Conv2d(256, out_channel, kernel_size=3, stride=2, padding=1)]
-    # layers += [nn.Conv2d(256, 128, kernel_size=1, stride=1)]
-    # layers += [nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1)]
+    layers += [nn.Conv2d(256, 256, kernel_size=3, stride=2, padding=1)]
+    layers += [nn.Conv2d(256, 128, kernel_size=1, stride=1)]
+    layers += [nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1)]
     if size == 300:
-        layers += [nn.Conv2d(out_channel, 128, kernel_size=1, stride=1)]
-        layers += [nn.Conv2d(128, out_channel, kernel_size=3, stride=1, padding=0)]
+        layers += [nn.Conv2d(256, 128, kernel_size=1, stride=1)]
+        layers += [nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=0)]
     else:
-        # layers += [nn.Conv2d(256, 128, kernel_size=1, stride=1)]
-        # layers += [nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1)]
-        layers += [nn.Conv2d(out_channel, 128, kernel_size=1, stride=1)]
-        layers += [nn.Conv2d(128, out_channel, kernel_size=3, stride=2, padding=1)]
+        layers += [nn.Conv2d(256, 128, kernel_size=1, stride=1)]
+        layers += [nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1)]
+        layers += [nn.Conv2d(256, 128, kernel_size=1, stride=1)]
+        layers += [nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1)]
 
     return layers
 
@@ -81,18 +81,15 @@ class SSDResNet(ResNet):
         #     if name.endswith("layer"+str(self.out_indices[0]+1)):
         #         norm_channel_dim = module[-1].conv3.out_channels
         self.inchannel = self.block.expansion * 512
-        self.outchannel = 128
+        self.outchannel = 256
         # .....
         if extra_stage==1:
             self.extra = nn.ModuleList(add_extras(self.inchannel))
         else:
             self.extra = nn.ModuleList(add_extras_ssd(input_size, self.inchannel, self.outchannel))
-        self.smooth1 = nn.Conv2d(
-            128, self.outchannel, kernel_size=3, stride=1, padding=1)
-        self.smooth2 = nn.Conv2d(
-            256, self.outchannel, kernel_size=3, stride=1, padding=1)
-        self.smooth3 = nn.Conv2d(
-            self.inchannel, self.outchannel, kernel_size=3, stride=1, padding=1)
+        self.smooth = nn.Conv2d(
+            self.inchannel, 512, kernel_size=3, stride=1, padding=1)
+
         if l2_norm_scale is None:
             self.l2_norm_scale = None
         else:
@@ -132,9 +129,7 @@ class SSDResNet(ResNet):
         if self.l2_norm_scale is not None:
             constant_init(self.l2_norm, self.l2_norm.scale)
         # init the extra smooth layers
-        xavier_init(self.smooth1)
-        xavier_init(self.smooth2)
-        xavier_init(self.smooth3)
+        xavier_init(self.smooth)
 
     def forward(self, x):
         x = self.conv1(x)
@@ -146,15 +141,11 @@ class SSDResNet(ResNet):
             res_layer = getattr(self, layer_name)
             x = res_layer(x)
             if i in self.out_indices:
-                if i == 1:
-                    c3=self.smooth1(x)
-                    outs.append(c3)
-                if i == 2:
-                    c4=self.smooth2(x)
-                    outs.append(c4)
                 if i == 3:
-                    c5=self.smooth3(x)
+                    c5=self.smooth(x)
                     outs.append(c5)
+                else:
+                    outs.append(x)
         #NB: 2 extra ouputs
         for i, layer in enumerate(self.extra):
             x = F.relu(layer(x), inplace=True)
